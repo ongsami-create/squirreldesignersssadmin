@@ -1453,7 +1453,7 @@
 
     <script>
         // GAS URL
-        const GAS_URL = 'https://script.google.com/macros/s/AKfycbyl1lH8EOnyFOxI__PyEk5e64uS923JGAmu3wYk_sMS8rEUVbU77bSWsTlxxl__UME/exec';
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbzNEE5lMN5nd-lDQ7mA7oog6_dqT-wjuyZE9bkjE28bOdjg6n4iQm7ArWF44cOhlKcj/exec';
 
         // 数据缓存 - 用于加速页面加载
         const dataCache = {
@@ -1900,6 +1900,46 @@
         let commSettlementKey = null; // username，用于结算状态存储的键
         let commSettlementAllData = [];
         let commSettlementFilteredData = [];
+
+        // ========== 50/100 池分配（方案 A + 时间戳分水岭） ==========
+        // 按 commission50SavedAt 时间戳切分 depositRecords：
+        //  - 早于分水岭（或分水岭未设置）→ 50 池
+        //  - 晚于或等于分水岭 → 100 池
+        // 退款场景按方案 A：50 池冻结时锁定佣金基数，不再回算。
+        function splitDepositToPools(quote) {
+            const records = (quote && quote.depositRecords) || [];
+            const splitTime = quote && quote.commission50SavedAt; // ISO string or null
+            let amount50 = 0, amount100 = 0;
+            for (const r of records) {
+                const amt = Number(r && r.amount) || 0;
+                if (!r || !r.date) {
+                    // 无日期的记录默认归 50 池（保守）
+                    amount50 += amt;
+                    continue;
+                }
+                if (!splitTime || new Date(r.date) < new Date(splitTime)) {
+                    amount50 += amt;
+                } else {
+                    amount100 += amt;
+                }
+            }
+            return { amount50, amount100 };
+        }
+
+        // 池锁状态判断（供 UI 锁死/保存校验共用）
+        // 返回: { canInput50, is50Locked, canInput100, is100Locked, pct50OfTotal }
+        function computePoolLockState(quote, grandTotal) {
+            const { amount50, amount100 } = splitDepositToPools(quote);
+            const total = Number(grandTotal) || 0;
+            const pct50OfTotal = total > 0 ? (amount50 / total) * 100 : 0;
+            const is50Locked = !!quote.commission50SavedAt;
+            const is100Locked = !!quote.commission100SavedAt;
+            // %(50) 可输入条件: 50 池占销售总价 > 40% 且 50 池未冻结
+            const canInput50 = pct50OfTotal > 40 && !is50Locked;
+            // %(100) 可输入条件: 100 池 > 0 且 100 池未冻结
+            const canInput100 = amount100 > 0 && !is100Locked;
+            return { canInput50, is50Locked, canInput100, is100Locked, pct50OfTotal, amount50, amount100 };
+        }
         
         // 角色label转roleKey
         function getRoleKeyFromLabel(label) {
@@ -2018,6 +2058,8 @@ let paidAmount = quote.paidAmount || 0;
                                 const totalComm100 = rolesWithDeduct.reduce((sum, r) => sum + r.comm100, 0);
                                 const totalDeductAll = rolesWithDeduct.reduce((sum, r) => sum + r.deduct100, 0);
                                 
+                                // === 50/100 池（项目级标识，方便 admin 一眼看出 50 池是否已冻结） ===
+                                const _pool = splitDepositToPools(quote);
                                 projectCommMap[projNo] = {
                                     projNo: projNo,
                                     date: quote.date || quote.createdAt,
@@ -2029,8 +2071,12 @@ let paidAmount = quote.paidAmount || 0;
                                     deductAmt: totalDeductAll, // 总扣除（所有角色的扣除总和）
                                     deductRemarks: quote.deductRemarks || ('扣除:' + deductSharedRoles.length + '个角色'),
                                     internalNotes: quote.commissionNotes || quote.internalNotes || '',
-                                    settled50: settled50,
-                                    settled100: settled100,
+                                    settled50: settled50, // 按用户的发工资状态（保留）
+                                    settled100: settled100, // 按用户的发工资状态（保留）
+                                    project50Saved: !!quote.commission50SavedAt, // 项目级：%(50) 已保存
+                                    project100Saved: !!quote.commission100SavedAt, // 项目级：%(100) 已保存
+                                    paidAmount50: _pool.amount50, // 50 池金额
+                                    paidAmount100: _pool.amount100, // 100 池金额
                                     roles: rolesWithDeduct, // 保存角色明细（含扣除信息）
 quote: quote,
                                     deductSharedRoles: deductSharedRoles,
@@ -2083,15 +2129,19 @@ quote: quote,
                 const isAllSettled = d.settled50 && d.settled100;
                 const rowStyle = isAllSettled ? 'background:#e8e8e8;color:#999;' : '';
                 const canCheck = !isAllSettled;
-                
+
                 // 角色显示（多个角色用逗号分隔）
                 const roleLabels = d.roles.map(r => r.role).join(', ');
-                
+
+                // 50/100 池标识（项目级）
+                const poolBadge50 = d.project50Saved ? '<span style="background:#e0e0e0;color:#666;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;">50池已结</span>' : '';
+                const poolBadge100 = d.project100Saved ? '<span style="background:#e0e0e0;color:#666;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;">100池已结</span>' : '';
+
                 html += '<tr style="' + rowStyle + '">';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
                 html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? '' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
                 html += '</td>';
-                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a><br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + '</small></td>';
+                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;line-height:1.6;">' + roleLabels + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;">' + d.debtPercent + '%</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled50 ? '✓' : 'RM ' + formatNumber(d.comm50)) + '</td>';
@@ -2554,56 +2604,52 @@ quote: quote,
                 subtotal = quote.items.reduce((sum, item) => sum + (item.subtotal || 0), 0);
             }
             const grandTotal = quote.grandTotal || quote.total || subtotal || 0;
-            let paidAmount = quote.paidAmount || 0;
-            let paidAmount50 = quote.paidAmount50 || 0; // 已付定金50
-            let paidAmount100 = quote.paidAmount100 || 0; // 已付定金100（后面增加的）
-            
-            // 检查是否已保存过50%佣金（任何角色的%50有值表示已进入100%阶段）
-            const has50CommissionSaved = (
-                quote.salespersonCommissionPct50 || 
-                quote.subSalespersonCommissionPct50 || 
-                quote.measurementEngineerCommissionPct50 || 
-                quote.designerCommissionPct50 || 
-                quote.generalManagerCommissionPct50
-            );
-            
-            // 如果已有明确的paidAmount50/paidAmount100字段，优先使用（保留原有值）
-            if (quote.paidAmount50 !== undefined && quote.paidAmount50 !== null){
-                paidAmount50 = quote.paidAmount50;
-                paidAmount100 = (quote.paidAmount100 !== undefined && quote.paidAmount100 !== null) ? quote.paidAmount100 : 0;
-                paidAmount = paidAmount50 + paidAmount100;
-            } else if (quote.depositRecords && quote.depositRecords.length > 0) {
-                // 没有明确的paidAmount字段，根据佣金计算历史动态分配
-                // 未计算50%佣金，所有定金归入50；已计算50%佣金，新增进定金归入100
-                let temp50 = 0, temp100 = 0;
-                quote.depositRecords.forEach(dep => {
-                    const amt = dep.amount || 0;
-                    if (!has50CommissionSaved) {
-                        // 未计算50%佣金，所有定金归入50
-                        temp50 += amt;
-                    } else if (dep.stage === 100) {
-                        // 明确标记为100%阶段的定金归入100
-                        temp100 += amt;
-                    } else {
-                        // 已计算过50%佣金，后续新增定金归入100
-                        temp100 += amt;
-                    }
-                });
-                if (!has50CommissionSaved) {
-                    paidAmount50 = temp50;
-                    paidAmount100 = 0;
+
+            // === 50/100 池分配（方案 A + 时间戳分水岭） ===
+            // 优先用 quote.commission50SavedAt 时间戳动态切分；
+            // 旧数据没有该字段时回退到"按角色是否有 pct50 推断"（保留向后兼容）
+            let poolState;
+            if (quote.commission50SavedAt) {
+                poolState = computePoolLockState(quote, grandTotal);
+            } else {
+                // 旧数据兼容：没有 commission50SavedAt 但有 pct50 时，按"有 pct50 → 已冻结"处理
+                const has50CommissionSaved = (
+                    quote.salespersonCommissionPct50 ||
+                    quote.subSalespersonCommissionPct50 ||
+                    quote.measurementEngineerCommissionPct50 ||
+                    quote.designerCommissionPct50 ||
+                    quote.generalManagerCommissionPct50
+                );
+                if (has50CommissionSaved) {
+                    // 旧数据视为已结清：用 depositRecords 全部分给 50
+                    const records = quote.depositRecords || [];
+                    const temp50 = records.reduce((s, r) => s + (Number(r && r.amount) || 0), 0);
+                    const temp100 = Number(quote.paidAmount100) || 0;
+                    const pct50OfTotal = grandTotal > 0 ? (temp50 / grandTotal) * 100 : 0;
+                    poolState = {
+                        canInput50: false,
+                        is50Locked: true,
+                        canInput100: temp100 > 0,
+                        is100Locked: !!quote.commission100SavedAt,
+                        pct50OfTotal,
+                        amount50: temp50,
+                        amount100: temp100
+                    };
                 } else {
-                    // 已计算50%佣金，新增进定金归入100
-                    paidAmount50 = temp50;
-                    paidAmount100 = temp100;
+                    // 全新数据：按时间戳逻辑，但还没设分水岭
+                    poolState = computePoolLockState(quote, grandTotal);
                 }
-                paidAmount = paidAmount50 + paidAmount100;
             }
+
+            const { amount50: paidAmount50, amount100: paidAmount100 } = poolState;
+            const paidAmount = paidAmount50 + paidAmount100;
             const debt = grandTotal - paidAmount;
             const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
             const debtPercentNum = parseFloat(debtPercent) || 0;
-            const canInput50 = debtPercentNum <= 60; //欠款<=60%才能输入50%佣金
-            const is50Locked = quote.settled50 && quote.settled50[currentCommUser]; // 50%是否已锁定
+            const canInput50 = poolState.canInput50;
+            const canInput100 = poolState.canInput100;
+            const is50Locked = poolState.is50Locked;
+            const is100Locked = poolState.is100Locked;
             
             // 保存给佣金计算用
             window.currentQuoteGrandTotal = grandTotal;
@@ -2682,7 +2728,7 @@ quote: quote,
                         '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.salesperson||'-') + '</div>' +
                         '<div style="width:60px;"><input type="number" id="comm_salesperson_pct50" value="' + (quote.salespersonCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'salesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_salesperson_amt50">RM ' + ((Math.round(paidAmount50 * (quote.salespersonCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_salesperson_pct100" value="' + (quote.salespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;" onchange="updateCommissionAmount(\'salesperson\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_salesperson_pct100" value="' + (quote.salespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'salesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_salesperson_amt100">RM ' + ((Math.round(paidAmount100 * (quote.salespersonCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_salesperson_total">RM ' + ((Math.round((paidAmount50 * (quote.salespersonCommissionPct50||0) + paidAmount100 * (quote.salespersonCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
@@ -2692,7 +2738,7 @@ quote: quote,
                         '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.subSalesperson||'-') + '</div>' +
                         '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct50" value="' + (quote.subSalespersonCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_subSalesperson_amt50">RM ' + ((Math.round(paidAmount50 * (quote.subSalespersonCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct100" value="' + (quote.subSalespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;" onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct100" value="' + (quote.subSalespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_subSalesperson_amt100">RM ' + ((Math.round(paidAmount100 * (quote.subSalespersonCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_subSalesperson_total">RM ' + ((Math.round((paidAmount50 * (quote.subSalespersonCommissionPct50||0) + paidAmount100 * (quote.subSalespersonCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
@@ -2702,7 +2748,7 @@ quote: quote,
                         '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.measurementEngineer||'-') + '</div>' +
                         '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct50" value="' + (quote.measurementEngineerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_measurementEngineer_amt50">RM ' + ((Math.round(paidAmount50 * (quote.measurementEngineerCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct100" value="' + (quote.measurementEngineerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;" onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct100" value="' + (quote.measurementEngineerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_measurementEngineer_amt100">RM ' + ((Math.round(paidAmount100 * (quote.measurementEngineerCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_measurementEngineer_total">RM ' + ((Math.round((paidAmount50 * (quote.measurementEngineerCommissionPct50||0) + paidAmount100 * (quote.measurementEngineerCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
@@ -2712,7 +2758,7 @@ quote: quote,
                         '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.designerName||'-') + '</div>' +
                         '<div style="width:60px;"><input type="number" id="comm_designer_pct50" value="' + (quote.designerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'designer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_designer_amt50">RM ' + ((Math.round(paidAmount50 * (quote.designerCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_designer_pct100" value="' + (quote.designerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;" onchange="updateCommissionAmount(\'designer\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_designer_pct100" value="' + (quote.designerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'designer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_designer_amt100">RM ' + ((Math.round(paidAmount100 * (quote.designerCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_designer_total">RM ' + ((Math.round((paidAmount50 * (quote.designerCommissionPct50||0) + paidAmount100 * (quote.designerCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
@@ -2722,7 +2768,7 @@ quote: quote,
                         '<div style="width:100px;"><select id="comm_generalManager_name" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;font-size:12px;"><option value="">' + (lang?'请选择':'Select') + '</option>' + ((dataCache.users||users).filter(u => u.departments && u.departments.includes('admin')).map(u => '<option value="' + (u.displayName||u.username) + '"' + (quote.generalManagerName === (u.displayName||u.username) ? ' selected' : '') + '>' + (u.displayName||u.username) + '</option>').join('')) + '</select></div>' +
                         '<div style="width:60px;"><input type="number" id="comm_generalManager_pct50" value="' + (quote.generalManagerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'generalManager\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_generalManager_amt50">RM ' + ((Math.round(paidAmount50 * (quote.generalManagerCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_generalManager_pct100" value="' + (quote.generalManagerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;" onchange="updateCommissionAmount(\'generalManager\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_generalManager_pct100" value="' + (quote.generalManagerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'generalManager\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_generalManager_amt100">RM ' + ((Math.round(paidAmount100 * (quote.generalManagerCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_generalManager_total">RM ' + ((Math.round((paidAmount50 * (quote.generalManagerCommissionPct50||0) + paidAmount100 * (quote.generalManagerCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
@@ -3096,22 +3142,81 @@ quote: quote,
         // 统一保存所有佣金数据（佣金计算 + 扣除佣金）
         async function saveAllCommission(projNo) {
             if (!projNo) return;
-            
+
             const grandTotal = window.currentQuoteGrandTotal || 0;
-            
-            // 获取佣金计算数据（50%和100%两组）
-            const salespersonPct50 = parseFloat(document.getElementById('comm_salesperson_pct50').value) || 0;
-            const salespersonPct100 = parseFloat(document.getElementById('comm_salesperson_pct100').value) || 0;
-            const subSalespersonPct50 = parseFloat(document.getElementById('comm_subSalesperson_pct50').value) || 0;
-            const subSalespersonPct100 = parseFloat(document.getElementById('comm_subSalesperson_pct100').value) || 0;
-            const measurementEngineerPct50 = parseFloat(document.getElementById('comm_measurementEngineer_pct50').value) || 0;
-            const measurementEngineerPct100 = parseFloat(document.getElementById('comm_measurementEngineer_pct100').value) || 0;
-            const designerPct50 = parseFloat(document.getElementById('comm_designer_pct50').value) || 0;
-            const designerPct100 = parseFloat(document.getElementById('comm_designer_pct100').value) || 0;
-            const generalManagerName = document.getElementById('comm_generalManager_name').value || '';
-            const generalManagerPct50 = parseFloat(document.getElementById('comm_generalManager_pct50').value) || 0;
-            const generalManagerPct100 = parseFloat(document.getElementById('comm_generalManager_pct100').value) || 0;
-            
+
+            // === 重新拉取 quote 用最新 depositRecords 算池（不在前端用缓存） ===
+            let quoteForPool = null;
+            try {
+                const _resp = await fetch(GAS_URL + '?action=getQuoteDetail&projNo=' + encodeURIComponent(projNo));
+                const _data = await _resp.json();
+                if (_data.success && _data.quote) quoteForPool = _data.quote;
+            } catch (e) { /* fallback to window */ }
+            if (!quoteForPool && window.currentQuoteDetail) quoteForPool = window.currentQuoteDetail;
+
+            // 防御：50 池已冻结时，忽略前端 pct50 输入（用 quote 里的旧值），避免锁了又被改
+            const is50Locked = quoteForPool && !!quoteForPool.commission50SavedAt;
+            const is100Locked = quoteForPool && !!quoteForPool.commission100SavedAt;
+
+            // v3.1 readPctSafe：3 层防御，**绝对不丢已有佣金**
+            // 1) input 不存在 → 用 fallback（旧值）
+            // 2) input 被 disabled → 用 fallback（锁了不该被改）
+            // 3) input 没值（空字符串）→ 用 fallback（用户没动）
+            // 4) input 有值（用户改过）→ 尊重用户
+            const readPctSafe = (id, existingValue) => {
+                const el = document.getElementById(id);
+                const fallback = Number(existingValue) || 0;
+                if (!el) return fallback;
+                if (el.disabled) return fallback;
+                const raw = el.value;
+                if (raw === null || raw === undefined || String(raw).trim() === '') return fallback;
+                const v = parseFloat(raw);
+                if (isNaN(v)) return fallback;
+                return v;
+            };
+
+            // 每个角色的 pct50：is50Locked 时强制用 quote 旧值；未锁时也用 readPctSafe 兜底
+            const salespersonPct50 = readPctSafe('comm_salesperson_pct50', is50Locked ? quoteForPool.salespersonCommissionPct50 : quoteForPool.salespersonCommissionPct50);
+            const subSalespersonPct50 = readPctSafe('comm_subSalesperson_pct50', is50Locked ? quoteForPool.subSalespersonCommissionPct50 : quoteForPool.subSalespersonCommissionPct50);
+            const measurementEngineerPct50 = readPctSafe('comm_measurementEngineer_pct50', is50Locked ? quoteForPool.measurementEngineerCommissionPct50 : quoteForPool.measurementEngineerCommissionPct50);
+            const designerPct50 = readPctSafe('comm_designer_pct50', is50Locked ? quoteForPool.designerCommissionPct50 : quoteForPool.designerCommissionPct50);
+            const generalManagerPct50 = readPctSafe('comm_generalManager_pct50', is50Locked ? quoteForPool.generalManagerCommissionPct50 : quoteForPool.generalManagerCommissionPct50);
+            // 每个角色的 pct100：is100Locked 时强制用 quote 旧值；未锁时也用 readPctSafe 兜底
+            const salespersonPct100 = readPctSafe('comm_salesperson_pct100', is100Locked ? quoteForPool.salespersonCommissionPct100 : quoteForPool.salespersonCommissionPct100);
+            const subSalespersonPct100 = readPctSafe('comm_subSalesperson_pct100', is100Locked ? quoteForPool.subSalespersonCommissionPct100 : quoteForPool.subSalespersonCommissionPct100);
+            const measurementEngineerPct100 = readPctSafe('comm_measurementEngineer_pct100', is100Locked ? quoteForPool.measurementEngineerCommissionPct100 : quoteForPool.measurementEngineerCommissionPct100);
+            const designerPct100 = readPctSafe('comm_designer_pct100', is100Locked ? quoteForPool.designerCommissionPct100 : quoteForPool.designerCommissionPct100);
+            const generalManagerPct100 = readPctSafe('comm_generalManager_pct100', is100Locked ? quoteForPool.generalManagerCommissionPct100 : quoteForPool.generalManagerCommissionPct100);
+            const generalManagerName = document.getElementById('comm_generalManager_name') ? (document.getElementById('comm_generalManager_name').value || '') : (quoteForPool.generalManagerName || '');
+
+            // 池分配：用最新 quote + 时间戳动态算
+            let paidAmount50ToSave = 0, paidAmount100ToSave = 0;
+            if (quoteForPool) {
+                const _pool = splitDepositToPools(quoteForPool);
+                paidAmount50ToSave = _pool.amount50;
+                paidAmount100ToSave = _pool.amount100;
+            } else {
+                paidAmount50ToSave = window.currentQuotePaidAmount50 || 0;
+                paidAmount100ToSave = window.currentQuotePaidAmount100 || 0;
+            }
+
+            // === 时间戳分水岭：首次保存 %(50) / %(100) 时写入 ===
+            // 任何角色 pct50 > 0 表示该阶段有数据
+            const anyPct50Input = [salespersonPct50, subSalespersonPct50, measurementEngineerPct50, designerPct50, generalManagerPct50].some(v => Number(v) > 0);
+            const anyPct100Input = [salespersonPct100, subSalespersonPct100, measurementEngineerPct100, designerPct100, generalManagerPct100].some(v => Number(v) > 0);
+            // 50 池冻结触发：之前没设过 commission50SavedAt 且 这次有 pct50 输入且 50 池 > 40% 销售总价
+            let commission50SavedAt = (quoteForPool && quoteForPool.commission50SavedAt) || null;
+            let commission100SavedAt = (quoteForPool && quoteForPool.commission100SavedAt) || null;
+            if (!commission50SavedAt && anyPct50Input) {
+                const pct50OfTotal = grandTotal > 0 ? (paidAmount50ToSave / grandTotal) * 100 : 0;
+                if (pct50OfTotal > 40) {
+                    commission50SavedAt = new Date().toISOString();
+                }
+            }
+            if (!commission100SavedAt && anyPct100Input && paidAmount100ToSave > 0) {
+                commission100SavedAt = new Date().toISOString();
+            }
+
             // 获取扣除佣金数据
             const profitPct = parseFloat(document.getElementById('deduct_profit_pct').value) || 0;
             const deductCommissionPct = getDeductCommissionPct(profitPct);
@@ -3121,7 +3226,7 @@ quote: quote,
             const hand30 = Math.round(handInput * 0.3);
             const remarks = document.getElementById('deduct_remarks').value;
             const totalDeduct = hand30 + deductCommissionAmt;
-            
+
             // 获取扣除承担角色
             const deductSharedRoles = [];
             if (document.getElementById('deduct_role_salesperson')?.checked) deductSharedRoles.push('salesperson');
@@ -3129,23 +3234,21 @@ quote: quote,
             if (document.getElementById('deduct_role_designer')?.checked) deductSharedRoles.push('designer');
             if (document.getElementById('deduct_role_surveyor')?.checked) deductSharedRoles.push('surveyor');
             if (document.getElementById('deduct_role_personInCharge')?.checked) deductSharedRoles.push('personInCharge');
-            
+
             try {
                 const response = await fetch(GAS_URL + '?action=getQuoteDetail&projNo=' + encodeURIComponent(projNo));
                 const data = await response.json();
-                
+
                 if (data.success && data.quote) {
                     const quote = data.quote;
                     const ownerUsername = quote.createdBy || sessionStorage.getItem('adminUsername') || '';
-                    
-                    // 保存当前的paidAmount50和paidAmount100（保留定金分配状态）
-                    const paidAmount50ToSave = window.currentQuotePaidAmount50 || 0;
-                    const paidAmount100ToSave = window.currentQuotePaidAmount100 || 0;
-                    
+
                     // 只发送佣金相关字段，大幅减少数据量
                     const commissionData = {
                         paidAmount50: paidAmount50ToSave,
                         paidAmount100: paidAmount100ToSave,
+                        commission50SavedAt: commission50SavedAt,
+                        commission100SavedAt: commission100SavedAt,
                         salespersonCommissionPct50: salespersonPct50,
                         salespersonCommissionPct100: salespersonPct100,
                         subSalespersonCommissionPct50: subSalespersonPct50,
@@ -3168,12 +3271,22 @@ deductCommissionPct: deductCommissionPct,
                         deductSharedRoles: deductSharedRoles
                     };
                     
-                    // 使用新的updateQuoteCommission action
-                    const saveUrl = GAS_URL + '?action=updateQuoteCommission&projNo=' + encodeURIComponent(projNo) + 
-                                   '&commissionData=' + encodeURIComponent(JSON.stringify(commissionData));
-                    
+                    // v3.1 修复 B：GAS 端没有 updateQuoteCommission action，改用 saveQuote（v3.1 patched saveQuote 有 merge 逻辑）
+                    // 走 saveQuote + merge，commission 字段会被保留
+                    const _fullQuote = Object.assign({}, quote, commissionData);
+                    const saveUrl = GAS_URL + '?action=saveQuote&username=' + encodeURIComponent(quote.createdBy || 'test') +
+                                   '&projNo=' + encodeURIComponent(projNo) +
+                                   '&quoteData=' + encodeURIComponent(JSON.stringify(_fullQuote));
+
+                    // v3.1 调试日志：把实际发的 payload 打到 console
+                    console.log('[v3.1 save] projNo=' + projNo);
+                    console.log('[v3.1 save] commission50SavedAt=' + commission50SavedAt + ' | commission100SavedAt=' + commission100SavedAt);
+                    console.log('[v3.1 save] paidAmount50=' + paidAmount50ToSave + ' | paidAmount100=' + paidAmount100ToSave);
+                    console.log('[v3.1 save] full payload (with merge via saveQuote):', _fullQuote);
+
                     const saveResponse = await fetch(saveUrl);
                     const saveResult = await saveResponse.json();
+                    console.log('[v3.1 save] GAS response:', saveResult);
                     if (saveResult.success) {
                         showSaveSuccessModal();
                         showToast(currentLang === 'zh' ? '已保存所有数据' : 'All data saved', 'success');
