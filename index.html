@@ -1997,6 +1997,11 @@ let paidAmount = quote.paidAmount || 0;
                         const debt = grandTotal - paidAmount;
                         const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
                         
+                        // 修复：佣金基数要用 splitDepositToPools 按池分开（与 Quote Details 一致）(2026-06-15)
+                        const _pool = splitDepositToPools(quote);
+                        const paidAmount50 = _pool.amount50;
+                        const paidAmount100 = _pool.amount100;
+                        
                         // 角色列表（使用扁平字段结构，与保存时一致）
                         const roles = [
                             {key: 'salesperson', label: '销售员', userField: 'salesperson', pct50Field: 'salespersonCommissionPct50', pct100Field: 'salespersonCommissionPct100'},
@@ -2015,8 +2020,9 @@ let paidAmount = quote.paidAmount || 0;
                             
                             // 检查：1.显示名匹配（displayName匹配报价中的角色字段）2.佣金百分比有值
                             if (userName.toUpperCase() === displayName.toUpperCase() && (pct50 > 0 || pct100 > 0)) {
-                                const comm50 = grandTotal * pct50 / 100;
-                                const comm100 = grandTotal * pct100 / 100;
+                                // 修复：佣金基数用 paidAmount50/paidAmount100 而不是 grandTotal (2026-06-15)
+                                const comm50 = paidAmount50 * pct50 / 100;
+                                const comm100 = paidAmount100 * pct100 / 100;
                                 matchedRoles.push({
                                     role: roleConfig.label,
                                     pct50: pct50,
@@ -2059,7 +2065,7 @@ let paidAmount = quote.paidAmount || 0;
                                 const totalDeductAll = rolesWithDeduct.reduce((sum, r) => sum + r.deduct100, 0);
                                 
                                 // === 50/100 池（项目级标识，方便 admin 一眼看出 50 池是否已冻结） ===
-                                const _pool = splitDepositToPools(quote);
+                                // 上面已经计算过 _pool / paidAmount50 / paidAmount100，复用即可 (2026-06-15)
                                 projectCommMap[projNo] = {
                                     projNo: projNo,
                                     date: quote.date || quote.createdAt,
@@ -2663,7 +2669,8 @@ quote: quote,
                 depositHtml = '<table style="width:100%;border-collapse:collapse;">';
                 depositHtml += '<tr style="background:#e8e8e8;"><th style="padding:8px;border:1px solid #ccc;text-align:left;">' + (lang?'日期':'Date') + '</th><th style="padding:8px;border:1px solid #ccc;text-align:left;">RECEIPT NO</th><th style="padding:8px;border:1px solid #ccc;text-align:right;">' + (lang?'金额':'Amount') + '</th></tr>';
                 quote.depositRecords.forEach(dep => {
-                    depositHtml += '<tr><td style="padding:8px;border:1px solid #ccc;">' + formatDateTime(dep.date||null) + '</td><td style="padding:8px;border:1px solid #ccc;">' + (dep.receiptNo||dep.note||'-') + '</td><td style="padding:8px;border:1px solid #ccc;text-align:right;">RM ' + formatNumber(dep.amount||0) + '</td></tr>';
+                    // 兼容历史 receipt 字段（报价系统旧版）+ 新 receiptNo 字段 (2026-06-15)
+                    depositHtml += '<tr><td style="padding:8px;border:1px solid #ccc;">' + formatDateTime(dep.date||null) + '</td><td style="padding:8px;border:1px solid #ccc;">' + (dep.receiptNo||dep.receipt||dep.note||'-') + '</td><td style="padding:8px;border:1px solid #ccc;text-align:right;">RM ' + formatNumber(dep.amount||0) + '</td></tr>';
                 });
                 depositHtml += '</table>';
             } else {
