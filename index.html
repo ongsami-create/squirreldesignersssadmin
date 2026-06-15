@@ -2064,6 +2064,20 @@ let paidAmount = quote.paidAmount || 0;
                                 const totalComm100 = rolesWithDeduct.reduce((sum, r) => sum + r.comm100, 0);
                                 const totalDeductAll = rolesWithDeduct.reduce((sum, r) => sum + r.deduct100, 0);
                                 
+                                // === 总实收计算规则（2026-06-15）===
+                                // (A) 已标"50%已结算"（project50Saved）：只算 100% 佣金 - 扣除
+                                // (B) 未标"50%已结算"：50% + 100% - 扣除（100% 为 0 也算 50%，按规则 C）
+                                const _project50Saved = !!quote.commission50SavedAt;
+                                let netCommTotal;
+                                if (_project50Saved) {
+                                    netCommTotal = totalComm100 - totalDeductAll;
+                                } else {
+                                    netCommTotal = totalComm50 + totalComm100 - totalDeductAll;
+                                }
+                                
+                                // 把 project50Saved 也下推到 role 层面，方便角色卡片显示
+                                rolesWithDeduct.forEach(r => { r.project50Saved = _project50Saved; });
+                                
                                 // === 50/100 池（项目级标识，方便 admin 一眼看出 50 池是否已冻结） ===
                                 // 上面已经计算过 _pool / paidAmount50 / paidAmount100，复用即可 (2026-06-15)
                                 projectCommMap[projNo] = {
@@ -2074,6 +2088,7 @@ let paidAmount = quote.paidAmount || 0;
                                     debtPercent: debtPercent,
                                     comm50: totalComm50,
                                     comm100: totalComm100,
+                                    netCommTotal: netCommTotal, // 按规则算的总实收
                                     deductAmt: totalDeductAll, // 总扣除（所有角色的扣除总和）
                                     deductRemarks: quote.deductRemarks || ('扣除:' + deductSharedRoles.length + '个角色'),
                                     internalNotes: quote.commissionNotes || quote.internalNotes || '',
@@ -2171,7 +2186,14 @@ quote: quote,
                 
                 // 显示每个角色的佣金
                 d.roles.forEach((role, rIdx) => {
-                    const netComm100 = role.comm100 - (role.deduct100 || 0);
+                    // 角色层面按规则算实收（2026-06-15）：
+                    // 已标 50%已结算 → 只算 100% - 扣除；未标 → 50% + 100% - 扣除
+                    let netComm100;
+                    if (role.project50Saved) {
+                        netComm100 = role.comm100 - (role.deduct100 || 0);
+                    } else {
+                        netComm100 = role.comm50 + role.comm100 - (role.deduct100 || 0);
+                    }
                     html += '<div style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:10px;">';
                     html += '<div style="font-weight:600;color:#00B3B8;margin-bottom:5px;">' + role.role + '</div>';
                     html += '<div style="font-size:12px;color:#666;">50% = RM ' + formatNumber(role.comm50) + ' (' + role.pct50 + '%)</div>';
@@ -2187,7 +2209,7 @@ quote: quote,
                 html += '<div style="margin-top:12px;padding:10px;background:#e8f5e9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">';
                 html += '<div><strong>' + (lang?'内部备注':'Internal Notes') + ':</strong> ' + (d.internalNotes || '-') + '</div>';
                 html += '<div><strong>' + (lang?'扣除分担':'Deduct Shared') + ':</strong> ' + (d.deductSharedRoles?.length > 0 ? d.deductSharedRoles.length + '个角色,每人RM ' + formatNumber(d.deductPerRole) : '-') + '</div>';
-                html += '<div style="font-size:16px;"><strong>' + (lang?'总实收100%':'Total Net 100%') + ':</strong> <span style="color:#28a745;font-weight:700;">RM ' + formatNumber(d.comm100 - d.deductAmt) + '</span></div>';
+                html += '<div style="font-size:16px;"><strong>' + (lang?'总实收100%':'Total Net 100%') + ':</strong> <span style="color:#28a745;font-weight:700;">RM ' + formatNumber(d.netCommTotal !== undefined ? d.netCommTotal : (d.comm100 - d.deductAmt)) + '</span></div>';
                 html += '</div>';
                 html += '</td></tr>';
             });
