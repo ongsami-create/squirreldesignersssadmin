@@ -3271,12 +3271,14 @@ deductCommissionPct: deductCommissionPct,
                         deductSharedRoles: deductSharedRoles
                     };
                     
-                    // v3.1 修复 B：GAS 端没有 updateQuoteCommission action，改用 saveQuote（v3.1 patched saveQuote 有 merge 逻辑）
-                    // 走 saveQuote + merge，commission 字段会被保留
+                    // v3.1 修复 C：改用 POST + form data（避免 GET URL 超长导致 fetch 失败）
+                    // GAS 端 doPost 直接转发到 doGet，能识别 action + quoteData
                     const _fullQuote = Object.assign({}, quote, commissionData);
-                    const saveUrl = GAS_URL + '?action=saveQuote&username=' + encodeURIComponent(quote.createdBy || 'test') +
-                                   '&projNo=' + encodeURIComponent(projNo) +
-                                   '&quoteData=' + encodeURIComponent(JSON.stringify(_fullQuote));
+                    const _postBody = new URLSearchParams();
+                    _postBody.append('action', 'saveQuote');
+                    _postBody.append('username', quote.createdBy || 'test');
+                    _postBody.append('projNo', projNo);
+                    _postBody.append('quoteData', JSON.stringify(_fullQuote));
 
                     // v3.1 调试日志：把实际发的 payload 打到 console
                     console.log('[v3.1 save] projNo=' + projNo);
@@ -3284,7 +3286,11 @@ deductCommissionPct: deductCommissionPct,
                     console.log('[v3.1 save] paidAmount50=' + paidAmount50ToSave + ' | paidAmount100=' + paidAmount100ToSave);
                     console.log('[v3.1 save] full payload (with merge via saveQuote):', _fullQuote);
 
-                    const saveResponse = await fetch(saveUrl);
+                    const saveResponse = await fetch(GAS_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: _postBody
+                    });
                     const saveResult = await saveResponse.json();
                     console.log('[v3.1 save] GAS response:', saveResult);
                     if (saveResult.success) {
