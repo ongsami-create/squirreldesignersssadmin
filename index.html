@@ -1441,7 +1441,7 @@
                     </div>
                     <div style="display:flex;gap:10px;">
                         <button id="btnMark50" class="btn btn-sm btn-warning" onclick="markCommSettled(50)" style="background:#ffc107;color:#000;">✓ 标记50%已结算</button>
-                        <button id="btnMark100" class="btn btn-sm btn-success" onclick="markCommSettled(100)" style="background:#28a745;opacity:0.5;" disabled title="请先标记50%已结算">✓ 标记100%已结算</button>
+                        <button id="btnMark100" class="btn btn-sm btn-success" onclick="markCommSettled(100)" style="background:#28a745;color:#fff;cursor:not-allowed;opacity:0.5;" disabled title="请先标记50%已结算">✓ 标记100%已结算</button>
                     </div>
                 </div>
             </div>
@@ -2246,7 +2246,7 @@ quote: quote,
                 html += '<div style="margin-top:12px;padding:10px;background:#e8f5e9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">';
                 html += '<div><strong>' + (lang?'内部备注':'Internal Notes') + ':</strong> ' + (d.internalNotes || '-') + '</div>';
                 html += '<div><strong>' + (lang?'扣除分担':'Deduct Shared') + ':</strong> ' + (d.deductSharedRoles?.length > 0 ? d.deductSharedRoles.length + '个角色,每人RM ' + formatNumber(d.deductPerRole) : '-') + '</div>';
-                html += '<div style="font-size:16px;"><strong>' + (lang?'总实收100%':'Total Net 100%') + ':</strong> <span style="color:#28a745;font-weight:700;">RM ' + formatNumber(d.netCommTotal !== undefined ? d.netCommTotal : (d.comm100 - d.deductAmt)) + '</span></div>';
+                html += '<div style="font-size:16px;"><strong>' + (lang?'总实收100%':'Total Net 100%') + ':</strong> <span style="color:#28a745;font-weight:700;">RM ' + formatNumber(d.netCommTotal !== undefined ? d.netCommTotal : 0) + '</span></div>';
                 html += '</div>';
                 html += '</td></tr>';
             });
