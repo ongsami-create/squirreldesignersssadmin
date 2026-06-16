@@ -1441,7 +1441,7 @@
                     </div>
                     <div style="display:flex;gap:10px;">
                         <button id="btnMark50" class="btn btn-sm btn-warning" onclick="markCommSettled(50)" style="background:#ffc107;color:#000;">✓ 标记50%已结算</button>
-                        <button id="btnMark100" class="btn btn-sm btn-success" onclick="markCommSettled(100)" style="background:#28a745;color:#fff;cursor:not-allowed;opacity:0.5;" disabled title="请先标记50%已结算">✓ 标记100%已结算</button>
+                        <button id="btnMark100" class="btn btn-sm btn-success" onclick="markCommSettled(100)" style="background:#28a745 !important;color:#fff !important;cursor:not-allowed !important;opacity:0.5 !important;filter:grayscale(50%);" disabled title="请先标记50%已结算">✓ 标记100%已结算</button>
                     </div>
                 </div>
             </div>
@@ -2068,12 +2068,13 @@ let paidAmount = quote.paidAmount || 0;
                                 const totalComm100 = rolesWithDeduct.reduce((sum, r) => sum + r.comm100, 0);
                                 const totalDeductAll = rolesWithDeduct.reduce((sum, r) => sum + r.deduct100, 0);
                                 
-                                // === 总实收计算规则（2026-06-15 v2）===
+                                // === 总实收计算规则（2026-06-16）===
+                                // 修复：用 settled50[commSettlementKey]（按用户手动标记），不是 project50Saved（保存佣金 % 时间戳）
                                 // (A) 未标"50%已结算"，50%+100% 都有金额 → 50% + 100% - 扣除
                                 // (B) 已标"50%已结算"，100% 有金额 → 只算 100% - 扣除
                                 // (C) 未标"50%已结算"，100%=0 而 50% 有金额 → 只算 50% - 扣除
                                 // (D) 未标"50%已结算"，50%=0 而 100% 有金额 → 只算 100% - 扣除
-                                const _project50Saved = !!quote.commission50SavedAt;
+                                const _project50Saved = !!(settled50);
                                 let netCommTotal;
                                 if (_project50Saved) {
                                     // 规则 B：已标 50%已结算，只看 100% 佣金
@@ -2131,9 +2132,10 @@ quote: quote,
                     commSettlementFilteredData = JSON.parse(JSON.stringify(userCommissions));
                     renderCommSettlementTable();
                     
-                    // 数据加载完，判断 100% 按钮是否启用（只要有任何 1 个项目已标 50% 即可启用） (2026-06-15)
-                    const anyProject50Saved = userCommissions.some(d => d.project50Saved);
-                    if (anyProject50Saved) {
+                    // 数据加载完，判断 100% 按钮是否启用（按用户已标 50% 即可启用）(2026-06-16)
+                    // 修复：用 settled50 而不是 project50Saved
+                    const anyUser50Settled = userCommissions.some(d => d.settled50);
+                    if (anyUser50Settled) {
                         const btn100 = document.getElementById('btnMark100');
                         if (btn100) { btn100.disabled = false; btn100.style.opacity = '1'; btn100.title = ''; }
                     }
@@ -2192,14 +2194,13 @@ quote: quote,
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled100 ? '✓' : 'RM ' + formatNumber(d.comm100)) + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#c00;">' + (d.deductAmt > 0 ? 'RM ' + formatNumber(d.deductAmt) : '-') + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
-                if (isAllSettled) {
+                // 修复 (2026-06-16)：状态用 settled50/settled100（按用户的手动发工资标志）
+                // 不再用 project50Saved（那是 Quote Details 保存佣金 % 的时间戳，与"已结算"语义不同）
+                if (d.settled50 && d.settled100) {
                     html += '<span style="background:#28a745;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">' + (lang?'已结算':'Settled') + '</span>';
-                } else if (d.project50Saved && d.project100Saved) {
-                    // 50% + 100% 都已标（虽然规则说不许 100% 未标时标 50%，但保留组合状态）
-                    html += '<span style="background:#28a745;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">' + (lang?'已结算':'Settled') + '</span>';
-                } else if (d.project50Saved) {
+                } else if (d.settled50) {
                     html += '<span style="background:#ffc107;color:#000;padding:3px 8px;border-radius:3px;font-size:11px;">50%</span>';
-                } else if (d.project100Saved) {
+                } else if (d.settled100) {
                     html += '<span style="background:#17a2b8;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">100%</span>';
                 } else {
                     html += '<span style="background:#6c757d;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">-</span>';
@@ -2302,7 +2303,7 @@ quote: quote,
         // 更新合计金额
         function updateCommSettlementTotal() {
             const lang = currentLang === 'zh';
-            let totalComm50 = 0, totalComm100 = 0, totalDeduct = 0;
+            let totalComm50 = 0, totalComm100 = 0, totalDeduct = 0, totalNet = 0;
             
             document.querySelectorAll('.comm-cb:checked').forEach(cb => {
                 const idx = parseInt(cb.dataset.idx);
@@ -2311,6 +2312,8 @@ quote: quote,
                     totalComm50 += d.comm50;
                     totalComm100 += d.comm100;
                     totalDeduct += d.deductAmt;
+                    // 修复 (2026-06-16)：实收按 4 条规则算，不只是 100% - 扣除
+                    totalNet += (d.netCommTotal !== undefined ? d.netCommTotal : (d.comm100 - d.deductAmt));
                 }
             });
             
@@ -2319,7 +2322,7 @@ quote: quote,
                 '<span style="font-weight:700;">50% = RM ' + formatNumber(totalComm50) + '</span> | ' +
                 '<span style="font-weight:700;">100% = RM ' + formatNumber(totalComm100) + '</span> | ' +
                 '<span>' + (lang?'扣除':'Deduct') + ' = RM ' + formatNumber(totalDeduct) + '</span> | ' +
-                '<span style="font-size:16px;font-weight:700;">' + (lang?'实收':'Net') + ' = RM ' + formatNumber(totalComm100 - totalDeduct) + '</span>';
+                '<span style="font-size:16px;font-weight:700;">' + (lang?'实收':'Net') + ' = RM ' + formatNumber(totalNet) + '</span>';
         }
 
         // 标记佣金已结算
@@ -2332,13 +2335,14 @@ quote: quote,
                 return;
             }
             
-            // 业务规则 (2026-06-15 v2)：未标"50%已结算"前不能标"100%已结算"
+            // 业务规则 (2026-06-16)：未标"50%已结算"前不能标"100%已结算"
+            // 修复：用 settled50[commSettlementKey]（按用户），不是 commission50SavedAt
             if (type === 100) {
                 const violators = [];
                 checkedBoxes.forEach(cb => {
                     const idx = parseInt(cb.dataset.idx);
                     const d = commSettlementFilteredData[idx];
-                    if (d && d.quote && !d.quote.commission50SavedAt) {
+                    if (d && d.quote && !(d.quote.settled50 && d.quote.settled50[commSettlementKey])) {
                         violators.push(d.projNo);
                     }
                 });
@@ -2359,13 +2363,16 @@ quote: quote,
                 
                 try {
                     const projNo = d.quote.projNo;
-                    // 改用 saveQuote action 写 commission50SavedAt / commission100SavedAt（项目级时间戳）
-                    // GAS 端 saveQuote v3.1 patched 已支持 Object.assign 写任意字段 (2026-06-15)
-                    const updatedQuote = { ...d.quote };
+                    // 修复 (2026-06-16)：写 settled50/settled100[username] = true（按用户的发工资标志）
+                    // 而不是写 commission50SavedAt/100SavedAt（那个是 Quote Details 保存佣金 % 的时间戳，不应联动）
+                    // GAS 端 saveQuote v3.1 patched 已支持 Object.assign 写任意字段
+                    const updatedQuote = JSON.parse(JSON.stringify(d.quote));
                     if (type === 50) {
-                        updatedQuote.commission50SavedAt = new Date().toISOString();
+                        if (!updatedQuote.settled50) updatedQuote.settled50 = {};
+                        updatedQuote.settled50[commSettlementKey] = new Date().toISOString();
                     } else {
-                        updatedQuote.commission100SavedAt = new Date().toISOString();
+                        if (!updatedQuote.settled100) updatedQuote.settled100 = {};
+                        updatedQuote.settled100[commSettlementKey] = new Date().toISOString();
                     }
                     const postData = new URLSearchParams();
                     postData.append('action', 'saveQuote');
@@ -2383,16 +2390,12 @@ quote: quote,
                     if (result.success) {
                         // 更新前端缓存的项目状态
                         if (type === 50) {
-                            d.quote.commission50SavedAt = updatedQuote.commission50SavedAt;
-                            d.project50Saved = true;
+                            d.quote.settled50 = updatedQuote.settled50;
+                            d.settled50 = true;
                         } else {
-                            d.quote.commission100SavedAt = updatedQuote.commission100SavedAt;
-                            d.project100Saved = true;
+                            d.quote.settled100 = updatedQuote.settled100;
+                            d.settled100 = true;
                         }
-                        // 同步更新每条 role
-                        d.roles.forEach(r => {
-                            if (type === 50) r.project50Saved = true;
-                        });
                         cb.disabled = true;
                         successCount++;
                     } else {
