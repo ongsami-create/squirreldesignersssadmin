@@ -2192,7 +2192,7 @@ quote: quote,
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;">' + d.debtPercent + '%</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled50 ? '✓' : 'RM ' + formatNumber(d.comm50)) + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled100 ? '✓' : 'RM ' + formatNumber(d.comm100)) + '</td>';
-                html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#c00;">' + (d.deductAmt > 0 ? 'RM ' + formatNumber(d.deductAmt) : '-') + '</td>';
+                html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#c00;">' + (d.settled100 ? '✓' : (d.deductAmt > 0 ? 'RM ' + formatNumber(d.deductAmt) : '-')) + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
                 // 修复 (2026-06-16)：状态用 settled50/settled100（按用户的手动发工资标志）
                 // 不再用 project50Saved（那是 Quote Details 保存佣金 % 的时间戳，与"已结算"语义不同）
@@ -2309,9 +2309,12 @@ quote: quote,
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
                 if (d) {
-                    totalComm50 += d.comm50;
-                    totalComm100 += d.comm100;
-                    totalDeduct += d.deductAmt;
+                    // 修复 (2026-06-16 v3)：已标 50%已结算的 → 50% 池金额不再计入合计（已发工资不重复算）
+                    // 已标 100%已结算的 → 100% 池金额不再计入合计
+                    if (!d.settled50) totalComm50 += d.comm50;
+                    if (!d.settled100) totalComm100 += d.comm100;
+                    // 扣除只在 100% 阶段扣，所以 100% 已发工资后扣除也不该重复算
+                    if (!d.settled100) totalDeduct += d.deductAmt;
                     // 修复 (2026-06-16)：实收按 4 条规则算，不只是 100% - 扣除
                     totalNet += (d.netCommTotal !== undefined ? d.netCommTotal : (d.comm100 - d.deductAmt));
                 }
