@@ -3151,11 +3151,14 @@ quote: quote,
         // 根据利润百分比计算扣除佣金百分比
         function getDeductCommissionPct(profitPct) {
             const profit = parseFloat(profitPct) || 0;
+            // 修复 (2026-06-16)：profit = 0 当作"未填"处理，返回 0（不按 5% 档位算）
+            if (profit <= 0) return 0;
             if (profit >= 20 && profit <= 24) return 1;
             if (profit >= 15 && profit < 20) return 2;
             if (profit >= 10 && profit < 15) return 3;
             if (profit >= 5 && profit < 10) return 4;
-            if (profit >= 0 && profit < 5) return 5;
+            // profit 在 (0, 5) 仍然按 5% 算
+            if (profit > 0 && profit < 5) return 5;
             return 0;
         }
         
