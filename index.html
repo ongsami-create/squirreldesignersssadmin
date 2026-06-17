@@ -1675,7 +1675,7 @@
 
         // Show admin page
         function showAdminPage() {
-            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('loginPage').style.display = 'none';
             document.getElementById('adminPage').classList.remove('hidden');
             document.getElementById('userDetailsPage').classList.remove('active');
             loadUsers();
