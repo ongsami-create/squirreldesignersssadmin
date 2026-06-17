@@ -1617,7 +1617,7 @@
             if (isLoggedIn) {
                 showAdminPage();
             } else {
-                document.getElementById('loginPage').style.display = 'flex';
+                document.getElementById('loginPage').classList.remove('hidden');
             }
         }
 
@@ -1675,7 +1675,7 @@
 
         // Show admin page
         function showAdminPage() {
-            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('loginPage').classList.add('hidden');
             document.getElementById('adminPage').classList.remove('hidden');
             document.getElementById('userDetailsPage').classList.remove('active');
             loadUsers();
