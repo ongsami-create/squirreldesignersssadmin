@@ -1423,8 +1423,7 @@
                         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
                             <input type="checkbox" id="commSelectAll" onchange="toggleAllComm(this.checked)"> 全选
                         </label>
-                        <button class="btn btn-sm btn-info" onclick="exportCommSettlementExcel()" style="background:#28a745;color:#fff;">📊 导出Excel</button>
-                        <button class="btn btn-sm btn-info" onclick="exportCommSettlementJson()" style="background:#17a2b8;color:#fff;">📄 导出JSON</button>
+                        <button class="btn btn-sm btn-info" onclick="exportCommSettlement()">📥 导出</button>
                     </div>
                 </div>
                 <!-- 数据表格 -->
@@ -2430,8 +2429,8 @@ quote: quote,
             }
         }
 
-        // 导出佣金结算 (Excel CSV) - 2026-06-16: 按示例格式，每个项目一行 + 5 个角色列
-        function exportCommSettlementExcel() {
+        // 导出佣金结算
+        function exportCommSettlement() {
             const lang = currentLang === 'zh';
             const checkedBoxes = document.querySelectorAll('.comm-cb:checked');
             
@@ -2439,155 +2438,29 @@ quote: quote,
                 alert(lang?'请先选择要导出的项目':'Please select projects to export');
                 return;
             }
-            
-            const today = new Date().toISOString().slice(0, 10);  // 2026-06-16
-            const displayName = currentCommUser || 'user';
-            const filename = `COMM_${displayName}_${today}.csv`;
-            
-            // 5 个角色列（按示例）
-            const roleKeys = [
-                { key: 'salespersonCommissionPct50', pct100Key: 'salespersonCommissionPct100', userKey: 'salesperson', name: 'Salesperson' },
-                { key: 'subSalespersonCommissionPct50', pct100Key: 'subSalespersonCommissionPct100', userKey: 'subSalesperson', name: 'Sub Salesperson' },
-                { key: 'measurementEngineerCommissionPct50', pct100Key: 'measurementEngineerCommissionPct100', userKey: 'measurementEngineer', name: 'Measurement' },
-                { key: 'designerCommissionPct50', pct100Key: 'designerCommissionPct100', userKey: 'designerName', name: 'Designer' },
-                { key: 'generalManagerCommissionPct50', pct100Key: 'generalManagerCommissionPct100', userKey: 'generalManagerName', name: 'General Mgr' }
-            ];
-            
-            // 从 getAllQuotes 数据中按 projNo 找 quote 来获取 5 个角色 + grandTotal + 各项 %
-            // 我们已经有 d.quote，5 个角色的 % 都在 d.quote 里
-            // 总扣除从 d.deductAmt 来
             
             let csv = '';
-            csv += 'DATE:,' + today + ',,,,,,,\n';
-            csv += 'ACCOUNT NAME:,' + csvField(displayName) + ',,,,,,,\n';
-            csv += 'PROJ NO,Salesperson,Sub Salesperson,Measurement,Designer,General Mgr,Deduction Commission,TOTAL,Internal Notes,REMARKS\n';
+            csv += csvField(lang?'佣金结算报表':'Commission Settlement Report') + '\n';
+            csv += csvField(lang?'用户：':'User: ') + currentCommUser + '\n';
+            csv += csvField(lang?'日期：':'Date: ') + new Date().toLocaleDateString() + '\n\n';
             
-            let totalAll = 0;
+            csv += csvField(lang?'项目编号':'Project No') + ',' + csvField(lang?'日期':'Date') + ',' + csvField(lang?'角色':'Role') + ',' + csvField(lang?'客户':'Customer') + ',' + csvField(lang?'销售总价':'Grand Total') + ',' + csvField(lang?'50%':'50%') + ',' + csvField(lang?'100%':'100%') + ',' + csvField(lang?'扣除':'Deduct') + ',' + csvField(lang?'实收':'Net') + ',' + csvField(lang?'内部备注':'Internal Notes') + '\n';
+            
+            let totalComm50 = 0, totalComm100 = 0, totalDeduct = 0;
             
             checkedBoxes.forEach(cb => {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
-                if (!d || !d.quote) return;
-                
-                const q = d.quote;
-                // 算每个角色的总佣金 (50% + 100%)，未标 50% 已结算才合计
-                const grandTotal = d.grandTotal;
-                const roleCells = roleKeys.map(rk => {
-                    const pct50 = q[rk.key] || 0;
-                    const pct100 = q[rk.pct100Key] || 0;
-                    // 按"未标 50% 已结算"规则：只算 comm50 + comm100；如果已标 50%，只看 100%
-                    let cellTotal;
-                    if (d.settled50) {
-                        cellTotal = grandTotal * pct100 / 100;
-                    } else {
-                        cellTotal = grandTotal * (pct50 + pct100) / 100;
-                    }
-                    // 如果这个角色不在用户分摊列表里，deduct 不算在这
-                    return cellTotal > 0 ? cellTotal : 0;
-                });
-                
-                // 扣除：未标 100% 已结算时显示负数；已标 100% 不显示
-                let deductCell = '';
-                if (!d.settled100 && d.deductAmt > 0) {
-                    deductCell = -d.deductAmt;
-                }
-                
-                // TOTAL = 5 角色总和 - 扣除
-                const roleSum = roleCells.reduce((a,b) => a+b, 0);
-                const totalCell = roleSum - (typeof deductCell === 'number' ? -deductCell : 0);
-                
-                csv += csvField(d.projNo) + ',';
-                roleCells.forEach(v => { csv += (v > 0 ? v.toFixed(0) : '') + ','; });
-                csv += (typeof deductCell === 'number' ? deductCell : '') + ',';
-                csv += (totalCell > 0 ? totalCell.toFixed(0) : '') + ',';
-                csv += csvField(d.internalNotes || '') + ',';
-                csv += '\n';
-                
-                totalAll += totalCell;
+                const net = d.comm100 - d.deductAmt;
+                csv += csvField(d.projNo) + ',' + csvField(d.date || '') + ',' + csvField(d.role) + ',' + csvField(d.customerName) + ',' + csvField('RM ' + formatNumber(d.grandTotal)) + ',' + csvField('RM ' + formatNumber(d.comm50)) + ',' + csvField('RM ' + formatNumber(d.comm100)) + ',' + csvField('RM ' + formatNumber(d.deductAmt)) + ',' + csvField('RM ' + formatNumber(net)) + ',' + csvField(d.internalNotes || '') + '\n';
+                totalComm50 += d.comm50;
+                totalComm100 += d.comm100;
+                totalDeduct += d.deductAmt;
             });
             
-            csv += '\n';
-            csv += 'TOTAL,,,,,,,' + (totalAll > 0 ? totalAll.toFixed(0) : '') + ',,\n';
+            csv += '\n' + csvField(lang?'合计':'Total') + ',,,,' + csvField('RM ' + formatNumber(totalComm50)) + ',' + csvField('RM ' + formatNumber(totalComm100)) + ',' + csvField('RM ' + formatNumber(totalDeduct)) + ',' + csvField('RM ' + formatNumber(totalComm100 - totalDeduct)) + '\n';
             
-            // 下载
             const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            link.click();
-            showToast((lang?'已导出：':'Exported: ') + filename, 'success');
-        }
-        
-        // 导出佣金结算 (JSON) - 2026-06-16: 保存到云端 Commission/<user>/COMM_<user>_<date>.json
-        async function exportCommSettlementJson() {
-            const lang = currentLang === 'zh';
-            const checkedBoxes = document.querySelectorAll('.comm-cb:checked');
-            
-            if (checkedBoxes.length === 0) {
-                alert(lang?'请先选择要导出的项目':'Please select projects to export');
-                return;
-            }
-            
-            const today = new Date().toISOString().slice(0, 10);
-            const displayName = currentCommUser || 'user';
-            const filename = `COMM_${displayName}_${today}.JSON`;
-            
-            // 收集所有勾选的项目数据
-            const exportData = {
-                date: today,
-                user: displayName,
-                username: commSettlementKey,
-                exportedAt: new Date().toISOString(),
-                items: []
-            };
-            
-            checkedBoxes.forEach(cb => {
-                const idx = parseInt(cb.dataset.idx);
-                const d = commSettlementFilteredData[idx];
-                if (d) {
-                    exportData.items.push({
-                        projNo: d.projNo,
-                        date: d.date,
-                        customerName: d.customerName,
-                        grandTotal: d.grandTotal,
-                        comm50: d.comm50,
-                        comm100: d.comm100,
-                        netCommTotal: d.netCommTotal,
-                        deductAmt: d.deductAmt,
-                        internalNotes: d.internalNotes,
-                        settled50: d.settled50,
-                        settled100: d.settled100,
-                        roles: d.roles
-                    });
-                }
-            });
-            
-            // 通过 GAS saveQuote + 自定义 action 写文件到云端
-            // 用一个通用 saveCommissionJson action（需要在 GAS 端实现）
-            try {
-                const postData = new URLSearchParams();
-                postData.append('action', 'saveCommissionJson');
-                postData.append('userFolder', displayName);
-                postData.append('filename', filename);
-                postData.append('jsonData', JSON.stringify(exportData));
-                
-                const response = await fetch(GAS_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: postData
-                });
-                const result = await response.json();
-                
-                if (result.success) {
-                    showToast((lang?'已导出到云端：':'Exported to cloud: ') + filename, 'success');
-                } else {
-                    showToast((lang?'云端导出失败：':'Cloud export failed: ') + (result.message || 'Unknown error'), 'error');
-                }
-            } catch (e) {
-                console.error('Export JSON error:', e);
-                showToast((lang?'云端导出失败：':'Cloud export failed: ') + e.message, 'error');
-            }
-        }
             const link = document.createElement('a');
             const filename = (lang?'CommSettlement_':'CommSettlement_') + currentCommUser + '_' + new Date().toISOString().slice(0,10) + '.csv';
             link.href = URL.createObjectURL(blob);
