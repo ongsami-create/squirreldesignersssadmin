@@ -1684,7 +1684,30 @@
             preloadAllUserStats();
         }
 
-        // 预加载所有用户统计数据
+        // Load users
+        async function loadUsers() {
+            try {
+                if (dataCache.users && Date.now() - dataCache.lastFetch < 5 * 60 * 1000) {
+                    users = dataCache.users;
+                    renderUserTable();
+                    updateStats();
+                    return;
+                }
+                const response = await fetch(GAS_URL + '?action=getDetailedUsers');
+                const data = await response.json();
+                if (data.success) {
+                    users = data.users || [];
+                    dataCache.users = users;
+                    dataCache.lastFetch = Date.now();
+                    renderUserTable();
+                    updateStats();
+                }
+            } catch (error) {
+                console.error('Failed to load users:', error);
+            }
+        }
+
+        // ???????????
         async function preloadAllUserStats() {
             if (!users || users.length === 0) return;
 
