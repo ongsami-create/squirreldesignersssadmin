@@ -1423,7 +1423,7 @@
                         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;">
                             <input type="checkbox" id="commSelectAll" onchange="toggleAllComm(this.checked)"> 全选
                         </label>
-                        <button class="btn btn-sm btn-info" onclick="exportCommSettlement()">📥 导出</button>
+                        <button class="btn btn-sm btn-info" onclick="exportCommSettlementExcel()" style="background:#28a745;color:#fff;">📊 导出Excel</button>
                     </div>
                 </div>
                 <!-- 数据表格 -->
@@ -2429,12 +2429,114 @@ quote: quote,
             }
         }
 
-        // 导出佣金结算
-        function exportCommSettlement() {
+        // 导出佣金结算 Excel (本地下载 + 云端保存) - 2026-06-17: 按示例格式
+        // 5 个角色列 + 扣除 + TOTAL + Internal Notes + REMARKS
+        async function exportCommSettlementExcel() {
             const lang = currentLang === 'zh';
             const checkedBoxes = document.querySelectorAll('.comm-cb:checked');
             
             if (checkedBoxes.length === 0) {
+                alert(lang?'请先选择要导出的项目':'Please select projects to export');
+                return;
+            }
+            
+            const today = new Date().toISOString().slice(0, 10);
+            const displayName = currentCommUser || 'user';
+            const filename = `COMM_${displayName}_${today}.csv`;
+            
+            // 5 个角色列（按示例 Excel 格式）
+            const roleKeys = [
+                { key: 'salespersonCommissionPct50', pct100Key: 'salespersonCommissionPct100', name: 'Salesperson' },
+                { key: 'subSalespersonCommissionPct50', pct100Key: 'subSalespersonCommissionPct100', name: 'Sub Salesperson' },
+                { key: 'measurementEngineerCommissionPct50', pct100Key: 'measurementEngineerCommissionPct100', name: 'Measurement' },
+                { key: 'designerCommissionPct50', pct100Key: 'designerCommissionPct100', name: 'Designer' },
+                { key: 'generalManagerCommissionPct50', pct100Key: 'generalManagerCommissionPct100', name: 'General Mgr' }
+            ];
+            
+            let csv = '';
+            csv += 'DATE:,' + today + ',,,,,,,\n';
+            csv += 'ACCOUNT NAME:,' + csvField(displayName) + ',,,,,,,\n';
+            csv += 'PROJ NO,Salesperson,Sub Salesperson,Measurement,Designer,General Mgr,Deduction Commission,TOTAL,Internal Notes,REMARKS\n';
+            
+            let totalAll = 0;
+            
+            checkedBoxes.forEach(cb => {
+                const idx = parseInt(cb.dataset.idx);
+                const d = commSettlementFilteredData[idx];
+                if (!d || !d.quote) return;
+                
+                const q = d.quote;
+                const grandTotal = d.grandTotal;
+                
+                // 每个角色的总佣金 (50% + 100%)，按 settled50 规则
+                const roleCells = roleKeys.map(rk => {
+                    const pct50 = q[rk.key] || 0;
+                    const pct100 = q[rk.pct100Key] || 0;
+                    let cellTotal;
+                    if (d.settled50) {
+                        cellTotal = grandTotal * pct100 / 100;  // 已标 50%：只看 100%
+                    } else {
+                        cellTotal = grandTotal * (pct50 + pct100) / 100;  // 未标：50+100
+                    }
+                    return cellTotal > 0 ? cellTotal : 0;
+                });
+                
+                // 扣除：未标 100% 已结算时显示负数
+                let deductCell = '';
+                if (!d.settled100 && d.deductAmt > 0) {
+                    deductCell = -d.deductAmt;
+                }
+                
+                // TOTAL = 5 角色总和 - 扣除
+                const roleSum = roleCells.reduce((a,b) => a+b, 0);
+                const totalCell = roleSum - (typeof deductCell === 'number' ? -deductCell : 0);
+                
+                csv += csvField(d.projNo) + ',';
+                roleCells.forEach(v => { csv += (v > 0 ? v.toFixed(0) : '') + ','; });
+                csv += (typeof deductCell === 'number' ? deductCell : '') + ',';
+                csv += (totalCell > 0 ? totalCell.toFixed(0) : '') + ',';
+                csv += csvField(d.internalNotes || '') + ',';
+                csv += '\n';
+                
+                totalAll += totalCell;
+            });
+            
+            csv += '\n';
+            csv += 'TOTAL,,,,,,,' + (totalAll > 0 ? totalAll.toFixed(0) : '') + ',,\n';
+            
+            // === 双路保存 (2026-06-17)：本地下载 + 云端上传 ===
+            // 1. 本地下载
+            const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            
+            // 2. 云端保存
+            try {
+                const postData = new URLSearchParams();
+                postData.append('action', 'saveCommissionCsv');
+                postData.append('userFolder', displayName);
+                postData.append('filename', filename);
+                postData.append('csvData', csv);
+                
+                const response = await fetch(GAS_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: postData
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showToast((lang?'已导出（本地+云端）：':'Exported (local+cloud): ') + filename, 'success');
+                } else {
+                    showToast((lang?'本地已下载，云端失败：':'Local saved, cloud failed: ') + (result.message || 'Unknown'), 'error');
+                }
+            } catch (e) {
+                console.error('Cloud save error:', e);
+                showToast((lang?'本地已下载，云端失败：':'Local saved, cloud failed: ') + e.message, 'error');
+            }
+        }
                 alert(lang?'请先选择要导出的项目':'Please select projects to export');
                 return;
             }
