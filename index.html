@@ -2455,14 +2455,15 @@ quote: quote,
         // 导出佣金结算 Excel (本地下载 + 云端保存) - 2026-06-17: 按示例格式
         // 5 个角色列 + 扣除 + TOTAL + Internal Notes + REMARKS
         async function exportCommSettlementExcel() {
+
             const lang = currentLang === 'zh';
             const checkedBoxes = document.querySelectorAll('.comm-cb:checked');
-            
+
             if (checkedBoxes.length === 0) {
                 alert(lang?'请先选择要导出的项目':'Please select projects to export');
                 return;
             }
-            
+
             const today = new Date().toISOString().slice(0, 10);
             const displayName = currentCommUser || 'user';
             const filename = `COMM_${displayName}_${today}.csv`;
@@ -2559,38 +2560,6 @@ quote: quote,
                 console.error('Cloud save error:', e);
                 showToast((lang?'本地已下载，云端失败：':'Local saved, cloud failed: ') + e.message, 'error');
             }
-        }
-                alert(lang?'请先选择要导出的项目':'Please select projects to export');
-                return;
-            }
-            
-            let csv = '';
-            csv += csvField(lang?'佣金结算报表':'Commission Settlement Report') + '\n';
-            csv += csvField(lang?'用户：':'User: ') + currentCommUser + '\n';
-            csv += csvField(lang?'日期：':'Date: ') + new Date().toLocaleDateString() + '\n\n';
-            
-            csv += csvField(lang?'项目编号':'Project No') + ',' + csvField(lang?'日期':'Date') + ',' + csvField(lang?'角色':'Role') + ',' + csvField(lang?'客户':'Customer') + ',' + csvField(lang?'销售总价':'Grand Total') + ',' + csvField(lang?'50%':'50%') + ',' + csvField(lang?'100%':'100%') + ',' + csvField(lang?'扣除':'Deduct') + ',' + csvField(lang?'实收':'Net') + ',' + csvField(lang?'内部备注':'Internal Notes') + '\n';
-            
-            let totalComm50 = 0, totalComm100 = 0, totalDeduct = 0;
-            
-            checkedBoxes.forEach(cb => {
-                const idx = parseInt(cb.dataset.idx);
-                const d = commSettlementFilteredData[idx];
-                const net = d.comm100 - d.deductAmt;
-                csv += csvField(d.projNo) + ',' + csvField(d.date || '') + ',' + csvField(d.role) + ',' + csvField(d.customerName) + ',' + csvField('RM ' + formatNumber(d.grandTotal)) + ',' + csvField('RM ' + formatNumber(d.comm50)) + ',' + csvField('RM ' + formatNumber(d.comm100)) + ',' + csvField('RM ' + formatNumber(d.deductAmt)) + ',' + csvField('RM ' + formatNumber(net)) + ',' + csvField(d.internalNotes || '') + '\n';
-                totalComm50 += d.comm50;
-                totalComm100 += d.comm100;
-                totalDeduct += d.deductAmt;
-            });
-            
-            csv += '\n' + csvField(lang?'合计':'Total') + ',,,,' + csvField('RM ' + formatNumber(totalComm50)) + ',' + csvField('RM ' + formatNumber(totalComm100)) + ',' + csvField('RM ' + formatNumber(totalDeduct)) + ',' + csvField('RM ' + formatNumber(totalComm100 - totalDeduct)) + '\n';
-            
-            const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
-            const link = document.createElement('a');
-            const filename = (lang?'CommSettlement_':'CommSettlement_') + currentCommUser + '_' + new Date().toISOString().slice(0,10) + '.csv';
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            link.click();
         }
 
         // 关闭佣金结算弹窗
