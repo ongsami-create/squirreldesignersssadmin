@@ -2454,6 +2454,12 @@ quote: quote,
 
         // 导出佣金结算 Excel (本地下载 + 云端保存) - 2026-06-17: 按示例格式
         // 5 个角色列 + 扣除 + TOTAL + Internal Notes + REMARKS
+
+        // CSV字段转义函数
+        function csvField(str) {
+            return '"' + String(str || '').replace(/"/g, '""') + '"';
+        }
+
         async function exportCommSettlementExcel() {
 
             const lang = currentLang === 'zh';
