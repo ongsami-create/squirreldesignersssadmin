@@ -2463,10 +2463,11 @@ quote: quote,
         async function exportCommSettlementExcel() {
 
             const lang = currentLang === 'zh';
-            const checkedBoxes = document.querySelectorAll('.comm-cb:checked');
+            // 导出：使用所有非disabled的勾选框（默认全部选中，由用户自行取消不需要的）
+            const checkedBoxes = document.querySelectorAll('.comm-cb:not(:disabled)');
 
             if (checkedBoxes.length === 0) {
-                alert(lang?'请先选择要导出的项目':'Please select projects to export');
+                alert(lang?'没有可导出的项目':'No projects to export');
                 return;
             }
 
