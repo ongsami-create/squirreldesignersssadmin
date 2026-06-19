@@ -2505,12 +2505,15 @@ quote: quote,
 
                 // 5个角色列的值（50%列 + 100%列）
                 // 逻辑：settled50=true → 50%列=0；settled100=true → 100%列=0
-                // d.roles 已包含 per-role 佣金和扣除，直接复用
-                const roleMap = {};
-                if (d.roles) {
-                    d.roles.forEach(r => { roleMap[r.roleKey] = r; });
-                }
-
+                // d.roles 已包含 per-role 佣金和扣除，直接按role标签匹配
+                // role标签中文映射：销售员/副销售员/测量员/设计师/总负责人
+                const roleLabelMap = {
+                    'salesperson': '销售员',
+                    'subSalesperson': '副销售员',
+                    'measurementEngineer': '测量员',
+                    'designerName': '设计师',
+                    'generalManagerName': '总负责人'
+                };
                 const roleCol50 = [];  // 5个角色的50%列值
                 const roleCol100 = []; // 5个角色的100%列值
                 roleKeys.forEach(rk => {
@@ -2520,7 +2523,9 @@ quote: quote,
                         roleCol100.push(0);
                         return;
                     }
-                    const roleData = roleMap[rk.userField];
+                    // 通过中文标签从d.roles中找对应角色数据
+                    const roleLabel = roleLabelMap[rk.userField];
+                    const roleData = roleLabel && d.roles ? d.roles.find(function(r) { return r.role === roleLabel; }) : null;
                     // settled50=true → 50%列=0；settled100=true → 100%列=0
                     const v50 = isSettled50 ? 0 : (roleData ? roleData.comm50 : 0);
                     const v100 = isSettled100 ? 0 : (roleData ? roleData.comm100 : 0);
