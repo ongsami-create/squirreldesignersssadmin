@@ -2501,22 +2501,18 @@ quote: quote,
                 const grandTotal = d.grandTotal;
 
                 // 每个角色列：只有该角色分配给当前用户才计算，否则为0
-                // 已结50%或已结100%时，该阶段佣金不再产生（已保存过）
                 const roleCells = roleKeys.map(rk => {
                     const assignedUser = q[rk.userField] || '';
                     // 角色未分配给当前用户 → 0
                     if (assignedUser.toUpperCase() !== displayName.toUpperCase()) return 0;
                     const pct50 = q[rk.key] || 0;
                     const pct100 = q[rk.pct100Key] || 0;
-                    // 已结50% → 50%阶段佣金为0；已结100% → 100%阶段也为0
-                    if (d.project50Saved) return 0;  // 50%已保存：已结，不再生效
-                    if (d.project100Saved) return 0; // 100%已保存：完全结清
                     return grandTotal * (pct50 + pct100) / 100;
                 });
 
-                // 扣除：已结100%时不扣除（完全结清）
+                // 扣除：显示扣除金额
                 let deductCell = '';
-                if (!d.project100Saved && d.deductAmt > 0) {
+                if (d.deductAmt > 0) {
                     deductCell = -d.deductAmt;
                 }
 
