@@ -2476,62 +2476,65 @@ quote: quote,
             const filename = `COMM_${displayName}_${today}.csv`;
             
             // 5 个角色列（按示例 Excel 格式）
+            // key: pct50字段名, pct100Key: pct100字段名, userField: 用户名字段名, name: 列标题
             const roleKeys = [
-                { key: 'salespersonCommissionPct50', pct100Key: 'salespersonCommissionPct100', name: 'Salesperson' },
-                { key: 'subSalespersonCommissionPct50', pct100Key: 'subSalespersonCommissionPct100', name: 'Sub Salesperson' },
-                { key: 'measurementEngineerCommissionPct50', pct100Key: 'measurementEngineerCommissionPct100', name: 'Measurement' },
-                { key: 'designerCommissionPct50', pct100Key: 'designerCommissionPct100', name: 'Designer' },
-                { key: 'generalManagerCommissionPct50', pct100Key: 'generalManagerCommissionPct100', name: 'General Mgr' }
+                { key: 'salespersonCommissionPct50', pct100Key: 'salespersonCommissionPct100', userField: 'salesperson', name: 'Salesperson' },
+                { key: 'subSalespersonCommissionPct50', pct100Key: 'subSalespersonCommissionPct100', userField: 'subSalesperson', name: 'Sub Salesperson' },
+                { key: 'measurementEngineerCommissionPct50', pct100Key: 'measurementEngineerCommissionPct100', userField: 'measurementEngineer', name: 'Measurement' },
+                { key: 'designerCommissionPct50', pct100Key: 'designerCommissionPct100', userField: 'designerName', name: 'Designer' },
+                { key: 'generalManagerCommissionPct50', pct100Key: 'generalManagerCommissionPct100', userField: 'generalManagerName', name: 'General Mgr' }
             ];
-            
+
             let csv = '';
             csv += 'DATE:,' + today + ',,,,,,,\n';
             csv += 'ACCOUNT NAME:,' + csvField(displayName) + ',,,,,,,\n';
             csv += 'PROJ NO,Salesperson,Sub Salesperson,Measurement,Designer,General Mgr,Deduction Commission,TOTAL,Internal Notes,REMARKS\n';
-            
+
             let totalAll = 0;
-            
+
             checkedBoxes.forEach(cb => {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
                 if (!d || !d.quote) return;
-                
+
                 const q = d.quote;
                 const grandTotal = d.grandTotal;
-                
-                // 每个角色的总佣金 (50% + 100%)，按 settled50 规则
+
+                // 每个角色列：只有该角色分配给当前用户才计算，否则为0
+                // 已结50%或已结100%时，该阶段佣金不再产生（已保存过）
                 const roleCells = roleKeys.map(rk => {
+                    const assignedUser = q[rk.userField] || '';
+                    // 角色未分配给当前用户 → 0
+                    if (assignedUser.toUpperCase() !== displayName.toUpperCase()) return 0;
                     const pct50 = q[rk.key] || 0;
                     const pct100 = q[rk.pct100Key] || 0;
-                    let cellTotal;
-                    if (d.settled50) {
-                        cellTotal = grandTotal * pct100 / 100;  // 已标 50%：只看 100%
-                    } else {
-                        cellTotal = grandTotal * (pct50 + pct100) / 100;  // 未标：50+100
-                    }
-                    return cellTotal > 0 ? cellTotal : 0;
+                    // 已结50% → 50%阶段佣金为0；已结100% → 100%阶段也为0
+                    if (d.project50Saved) return 0;  // 50%已保存：已结，不再生效
+                    if (d.project100Saved) return 0; // 100%已保存：完全结清
+                    return grandTotal * (pct50 + pct100) / 100;
                 });
-                
-                // 扣除：未标 100% 已结算时显示负数
+
+                // 扣除：已结100%时不扣除（完全结清）
                 let deductCell = '';
-                if (!d.settled100 && d.deductAmt > 0) {
+                if (!d.project100Saved && d.deductAmt > 0) {
                     deductCell = -d.deductAmt;
                 }
-                
+
                 // TOTAL = 5 角色总和 - 扣除
-                const roleSum = roleCells.reduce((a,b) => a+b, 0);
-                const totalCell = roleSum - (typeof deductCell === 'number' ? -deductCell : 0);
-                
+                const roleSum = roleCells.reduce((a, b) => a + b, 0);
+                const totalCell = roleSum + (typeof deductCell === 'number' ? deductCell : 0);
+
                 csv += csvField(d.projNo) + ',';
                 roleCells.forEach(v => { csv += (v > 0 ? v.toFixed(0) : '') + ','; });
                 csv += (typeof deductCell === 'number' ? deductCell : '') + ',';
                 csv += (totalCell > 0 ? totalCell.toFixed(0) : '') + ',';
                 csv += csvField(d.internalNotes || '') + ',';
-                csv += '\n';
-                
+                // REMARKS 字段：从 deductRemarks 取，若为空则用 quote.commissionNotes
+                csv += csvField(q.deductRemarks || q.commissionNotes || '') + ',\n';
+
                 totalAll += totalCell;
             });
-            
+
             csv += '\n';
             csv += 'TOTAL,,,,,,,' + (totalAll > 0 ? totalAll.toFixed(0) : '') + ',,\n';
             
