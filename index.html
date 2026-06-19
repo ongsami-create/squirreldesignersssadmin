@@ -2486,8 +2486,8 @@ quote: quote,
             ];
 
             let csv = '';
-            csv += 'DATE:,' + today + ',,,,,,,,,\n';
-            csv += 'ACCOUNT NAME:,' + csvField(displayName) + ',,,,,,,,,\n';
+            csv += 'DATE:,' + today + ',,,,,,,,,,,,,,\n';
+            csv += 'ACCOUNT NAME:,' + csvField(displayName) + ',,,,,,,,,,,,,,\n';
             csv += 'PROJ NO,Salesperson 50%,Sub Salesperson 50%,Measurement 50%,Designer 50%,General Mgr 50%,Salesperson 100%,Sub Salesperson 100%,Measurement 100%,Designer 100%,General Mgr 100%,Deduction,TOTAL,Internal Notes,REMARKS\n';
 
             let totalAll = 0;
@@ -2503,52 +2503,44 @@ quote: quote,
                 const isSettled50 = !!d.settled50;  // 已标"50%已结算"
                 const isSettled100 = !!d.settled100; // 已标"100%已结算"
 
-                // 每个角色列：50%列 = paidAmount50×pct50，100%列 = paidAmount100×pct100
-                // 但已结算的列显示0（不再计算佣金）
-                // 扣除均分到承担扣除的角色列
-                const deductPerRole = (d.deductAmt > 0 && d.deductSharedRoles && d.deductSharedRoles.length > 0)
-                    ? (d.deductAmt / d.deductSharedRoles.length) : 0;
-                const deductPerRoleMap = {};
-                if (d.deductSharedRoles) {
-                    d.deductSharedRoles.forEach(rk => { deductPerRoleMap[rk] = deductPerRole; });
+                // 5个角色列的值（50%列 + 100%列）
+                // 逻辑：settled50=true → 50%列=0；settled100=true → 100%列=0
+                // d.roles 已包含 per-role 佣金和扣除，直接复用
+                const roleMap = {};
+                if (d.roles) {
+                    d.roles.forEach(r => { roleMap[r.roleKey] = r; });
                 }
 
-                const roleCol50 = []; // 5个角色的50%列值
+                const roleCol50 = [];  // 5个角色的50%列值
                 const roleCol100 = []; // 5个角色的100%列值
                 roleKeys.forEach(rk => {
                     const assignedUser = q[rk.userField] || '';
-                    const roleKey = rk.userField; // 同userField作为key
-                    const isShared = !!deductPerRoleMap[roleKey];
-                    const deductAmt = isShared ? deductPerRole : 0;
-
                     if (assignedUser.toUpperCase() !== displayName.toUpperCase()) {
-                        roleCol50.push({ val: 0, deduct: 0 });
-                        roleCol100.push({ val: 0, deduct: 0 });
+                        roleCol50.push(0);
+                        roleCol100.push(0);
                         return;
                     }
-
-                    const pct50 = q[rk.key] || 0;
-                    const pct100 = q[rk.pct100Key] || 0;
-
-                    // 已标50%已结算 → 50%列=0；已标100%已结算 → 100%列=0
-                    const v50 = isSettled50 ? 0 : paid50 * pct50 / 100;
-                    const v100 = isSettled100 ? 0 : paid100 * pct100 / 100;
-
-                    roleCol50.push({ val: v50, deduct: deductAmt / 2 }); // 扣除各半
-                    roleCol100.push({ val: v100, deduct: deductAmt / 2 });
+                    const roleData = roleMap[rk.userField];
+                    // settled50=true → 50%列=0；settled100=true → 100%列=0
+                    const v50 = isSettled50 ? 0 : (roleData ? roleData.comm50 : 0);
+                    const v100 = isSettled100 ? 0 : (roleData ? roleData.comm100 : 0);
+                    roleCol50.push(v50);
+                    roleCol100.push(v100);
                 });
 
-                // 50%角色列净合计，100%角色列净合计
-                const col5050 = roleCol50.reduce((s, r) => s + r.val - r.deduct, 0);
-                const col100 = roleCol100.reduce((s, r) => s + r.val - r.deduct, 0);
-                // Deduction Commission列：显示扣除总金额（各角色列已各扣一半，这里显示总数）
-                const deductCell = d.deductAmt > 0 ? -d.deductAmt : '';
-                // TOTAL = (50%列合计 + 100%列合计 + 扣除列)，扣除列是负数所以用+
-                const totalCell = col5050 + col100 + (typeof deductCell === 'number' ? deductCell : 0);
+                // Deduction列：若有扣除，显示总扣除金额（TEST有承担的角色时才显示）
+                // d.deductAmt是均分后单角色值，检查TEST是否有角色在扣除列表
+                const testHasDeductRole = d.deductSharedRoles && d.deductSharedRoles.some(function(r) {
+                    // personInCharge → generalManagerName
+                    if (r === 'personInCharge') return q.generalManagerName && q.generalManagerName.toUpperCase() === displayName.toUpperCase();
+                    return q[r] && q[r].toUpperCase() === displayName.toUpperCase();
+                });
+                const deductCell = (d.deductAmt > 0 && testHasDeductRole) ? -d.deductAmt : '';
+                const totalCell = roleCol50.reduce((a, b) => a + b, 0) + roleCol100.reduce((a, b) => a + b, 0) + (typeof deductCell === 'number' ? deductCell : 0);
 
                 csv += csvField(d.projNo) + ',';
-                roleCol50.forEach(r => { csv += (r.val > 0 ? r.val.toFixed(0) : '') + ','; });
-                roleCol100.forEach(r => { csv += (r.val > 0 ? r.val.toFixed(0) : '') + ','; });
+                roleCol50.forEach(v => { csv += (v > 0 ? v.toFixed(0) : '') + ','; });
+                roleCol100.forEach(v => { csv += (v > 0 ? v.toFixed(0) : '') + ','; });
                 csv += (typeof deductCell === 'number' ? deductCell : '') + ',';
                 csv += (totalCell > 0 ? totalCell.toFixed(0) : '') + ',';
                 csv += csvField(d.internalNotes || '') + ',';
@@ -2558,7 +2550,7 @@ quote: quote,
             });
 
             csv += '\n';
-            csv += 'TOTAL,,,,,,,,,,,,,' + (totalAll > 0 ? totalAll.toFixed(0) : '') + ',,\n';
+            csv += 'TOTAL,,,,,,,,,,,' + (totalAll > 0 ? totalAll.toFixed(0) : '') + ',,,\n';
             
             // === 双路保存 (2026-06-17)：本地下载 + 云端上传 ===
             // 1. 本地下载
