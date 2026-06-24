@@ -2782,33 +2782,56 @@ quote: quote,
         }
 
         // Render quote list in user details
-        function renderDetailQuoteList(quotes) {
+function renderDetailQuoteList(quotes) {
             const container = document.getElementById('detailQuoteList');
             if (!container) return;
 
             if (quotes.length === 0) {
-                container.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">' + 
+                container.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">' +
                     (currentLang === 'zh' ? '暂无报价' : 'No quotes yet') + '</td></tr>';
                 return;
             }
 
-            container.innerHTML = quotes.map(q => {
+            // 2026-06-24：按 sortTimestamp 倒序排列（最新的在最上面）
+            const sortedQuotes = quotes.slice().sort(function(a, b) {
+                const aTs = a.sortTimestamp || '';
+                const bTs = b.sortTimestamp || '';
+                if (aTs && bTs) return new Date(bTs) - new Date(aTs);
+                if (aTs) return -1;
+                if (bTs) return 1;
+                return 0;
+            });
+
+            container.innerHTML = sortedQuotes.map(q => {
                 const statusClass = q.status === 'completed' ? 'status-completed' : 'status-active';
-                const statusText = q.status === 'completed' ? 
-                    (currentLang === 'zh' ? '已完成' : 'Completed') : 
+                const statusText = q.status === 'completed' ?
+                    (currentLang === 'zh' ? '已完成' : 'Completed') :
                     (currentLang === 'zh' ? '进行中' : 'Active');
                 // Use grandTotal/paidAmount/debt from GAS response
                 const amount = q.grandTotal !== undefined ? q.grandTotal : (q.total || 0);
                 const debt = q.debt !== undefined ? q.debt : 0;
                 // 计算欠款百分比（保留1位小数）
                 const debtPct = amount > 0 ? ((debt / amount) * 100).toFixed(1) + '%' : '-';
+
+                // 2026-06-24：佣金时间戳徽章（合并到状态列）
+                const has50 = !!q.commission50SavedAt;
+                const has100 = !!q.commission100SavedAt;
+                let commBadge = '';
+                if (has50 && has100) {
+                    commBadge = '<span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50%+100%</span>';
+                } else if (has50) {
+                    commBadge = '<span style="background:#00B3B8;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50%</span>';
+                } else if (has100) {
+                    commBadge = '<span style="background:#ffc107;color:#333;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 100%</span>';
+                }
+
                 return '<tr onclick="openQuoteDetail(\'' + escapeHtml(q.projNo) + '\')" style="cursor:pointer;">' +
                     '<td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(\'' + escapeHtml(q.projNo) + '\')" style="color:#00B3B8;">' + escapeHtml(q.projNo) + '</a></td>' +
                     '<td>' + escapeHtml(q.customerName || '-') + '</td>' +
                     '<td>RM ' + formatNumber(amount) + '</td>' +
                     '<td>RM ' + formatNumber(debt) + '</td>' +
                     '<td>' + debtPct + '</td>' +
-                    '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
+                    '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span>' + commBadge + '</td>' +
                     '<td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')">分享</button></td>' +
                 '</tr>';
             }).join('');
