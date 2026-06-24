@@ -2569,7 +2569,7 @@ quote: quote,
             try {
                 const postData = new URLSearchParams();
                 postData.append('action', 'saveCommissionCsv');
-                postData.append('userFolder', displayName);
+                postData.append('userFolder', commSettlementKey || displayName);
                 postData.append('filename', filename);
                 postData.append('csvData', csv);
                 
