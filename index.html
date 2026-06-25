@@ -2208,7 +2208,7 @@ quote: quote,
 
                 html += '<tr style="' + rowStyle + '">';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
-                html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? '' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
+                html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? 'checked' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
                 html += '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;line-height:1.6;">' + roleLabels + '</td>';
@@ -2463,11 +2463,17 @@ quote: quote,
         async function exportCommSettlementExcel() {
 
             const lang = currentLang === 'zh';
-            // 导出：使用所有非disabled的勾选框（默认全部选中，由用户自行取消不需要的）
-            const checkedBoxes = document.querySelectorAll('.comm-cb:not(:disabled)');
+            // 导出：只导出用户勾选的（checked && not disabled）
+            const checkedBoxes = document.querySelectorAll('.comm-cb:checked:not(:disabled)');
 
             if (checkedBoxes.length === 0) {
-                alert(lang?'没有可导出的项目':'No projects to export');
+                // 如果一行都没勾选，提示用户
+                const allBoxes = document.querySelectorAll('.comm-cb:not(:disabled)');
+                if (allBoxes.length === 0) {
+                    alert(lang?'没有可导出的项目':'No projects to export');
+                } else {
+                    alert(lang?'请先勾选要导出的项目':'Please select projects to export');
+                }
                 return;
             }
 
