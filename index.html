@@ -2208,7 +2208,7 @@ quote: quote,
 
                 html += '<tr style="' + rowStyle + '">';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
-                html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? 'checked' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
+                html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? '' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
                 html += '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;line-height:1.6;">' + roleLabels + '</td>';
