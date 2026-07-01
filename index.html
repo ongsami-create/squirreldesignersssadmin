@@ -1230,10 +1230,11 @@
 
             <!-- Quote List -->
             <div class="quote-list-section" style="margin-top: 25px;">
-                <h3 class="section-title" style="margin-bottom: 15px;" data-i18n="quoteList">报价列表</h3>
+<h3 class="section-title" style="margin-bottom: 15px;" data-i18n="quoteList">报价列表</h3>
                 <table class="quote-table">
                     <thead>
                         <tr>
+                            <th style="cursor:pointer;user-select:none;" onclick="toggleDetailQuoteDateSort()">日期 <span id="detailDateSortIndicator">▼</span></th>
                             <th>ProjNo</th>
                             <th data-i18n="customer">客户</th>
                             <th data-i18n="amount">金额</th>
@@ -1243,7 +1244,7 @@
                             <th data-i18n="actions">操作</th>
                         </tr>
                     </thead>
-                    <tbody id="detailQuoteList"><tr onclick="openQuoteDetail(&#39;test1111&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test1111&#39;)" style="color:#00B3B8;">test1111</a></td><td>smandi</td><td>RM 1,200</td><td>RM 1,000</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test1111&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;TEST2400&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;TEST2400&#39;)" style="color:#00B3B8;">TEST2400</a></td><td>SGRACE</td><td>RM 1,200</td><td>RM 1,200</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;TEST2400&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test5555&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test5555&#39;)" style="color:#00B3B8;">test5555</a></td><td>test5555</td><td>RM 350</td><td>RM 350</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test5555&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test2300&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test2300&#39;)" style="color:#00B3B8;">test2300</a></td><td>sammm</td><td>RM 950</td><td>RM 950</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test2300&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test2200&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test2200&#39;)" style="color:#00B3B8;">test2200</a></td><td>ssJOJO</td><td>RM 1,200</td><td>RM 1,200</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test2200&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test2100&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test2100&#39;)" style="color:#00B3B8;">test2100</a></td><td>cannine</td><td>RM 950</td><td>RM 950</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test2100&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test1101&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test1101&#39;)" style="color:#00B3B8;">test1101</a></td><td>Sismondi</td><td>RM 1,200</td><td>RM 1,200</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test1101&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test1102&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test1102&#39;)" style="color:#00B3B8;">test1102</a></td><td>sssmandi</td><td>RM 950</td><td>RM 850</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test1102&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test00&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test00&#39;)" style="color:#00B3B8;">test00</a></td><td>mandi</td><td>RM 1,750</td><td>RM 1,750</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test00&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test99&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test99&#39;)" style="color:#00B3B8;">test99</a></td><td>vincent</td><td>RM 350</td><td>RM 0</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test99&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test5678&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test5678&#39;)" style="color:#00B3B8;">test5678</a></td><td>test333</td><td>RM 950</td><td>RM 950</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test5678&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test55&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test55&#39;)" style="color:#00B3B8;">test55</a></td><td>JOJO</td><td>RM 150</td><td>RM 150</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test55&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test20&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test20&#39;)" style="color:#00B3B8;">test20</a></td><td>GRACE</td><td>RM 1,250</td><td>RM 1,000</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test20&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test1&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test1&#39;)" style="color:#00B3B8;">test1</a></td><td>Sam</td><td>RM 2,000</td><td>RM 1,000</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test1&#39;)">分享</button></td></tr><tr onclick="openQuoteDetail(&#39;test3&#39;)" style="cursor:pointer;"><td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(&#39;test3&#39;)" style="color:#00B3B8;">test3</a></td><td>GRACE</td><td>RM 8,000</td><td>RM 4,000</td><td><span class="status-badge status-active">进行中</span></td><td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(&#39;test3&#39;)">分享</button></td></tr></tbody>
+                    <tbody id="detailQuoteList"></tbody>
                 </table>
             </div>
         </div>
@@ -1461,6 +1462,11 @@
             userStats: {},        // 用户统计数据缓存 { username: { statistics, quotes, activities } }
             lastFetch: null        // 最后获取数据时间
         };
+
+        // 报价列表排序状态：'default' (有佣金在上，按时间戳倒序)，'dateAsc'，'dateDesc'
+        let detailQuoteSort = 'default';
+        // 缓存当前用户的全部 quotes，用于排序切换
+        let detailQuoteListCache = [];
 
         // Translations
         const translations = {
@@ -2792,21 +2798,54 @@ function renderDetailQuoteList(quotes) {
             const container = document.getElementById('detailQuoteList');
             if (!container) return;
 
-            if (quotes.length === 0) {
-                container.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;">' +
+            // 缓存当前 quotes（用于日期列点击排序时复用）
+            detailQuoteListCache = quotes || [];
+
+            if (detailQuoteListCache.length === 0) {
+                container.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;">' +
                     (currentLang === 'zh' ? '暂无报价' : 'No quotes yet') + '</td></tr>';
                 return;
             }
 
-            // 2026-06-24：按 sortTimestamp 倒序排列（最新的在最上面）
-            const sortedQuotes = quotes.slice().sort(function(a, b) {
-                const aTs = a.sortTimestamp || '';
-                const bTs = b.sortTimestamp || '';
+            // 2026-07-01：分组排序
+            // 有标注佣金（50 或 100 任一）排在上面，按 sortTimestamp 倒序
+            // 没标注的排在下面，按 createdAt/date 倒序
+            // detailQuoteSort === 'dateAsc' / 'dateDesc' 时覆盖为纯日期排序
+            const sortedQuotes = detailQuoteListCache.slice().sort(function(a, b) {
+                // 纯日期排序模式：覆盖默认分组
+                if (detailQuoteSort === 'dateAsc' || detailQuoteSort === 'dateDesc') {
+                    const aDate = a.date || a.createdAt || a.sortTimestamp || '';
+                    const bDate = b.date || b.createdAt || b.sortTimestamp || '';
+                    if (aDate && bDate) {
+                        return detailQuoteSort === 'dateAsc'
+                            ? new Date(aDate) - new Date(bDate)
+                            : new Date(bDate) - new Date(aDate);
+                    }
+                    if (aDate) return detailQuoteSort === 'dateAsc' ? -1 : 1;
+                    if (bDate) return detailQuoteSort === 'dateAsc' ? 1 : -1;
+                    return 0;
+                }
+                // 默认模式：先按是否标注佣金分组
+                const aHasComm = !!(a.commission50SavedAt || a.commission100SavedAt);
+                const bHasComm = !!(b.commission50SavedAt || b.commission100SavedAt);
+                if (aHasComm && !bHasComm) return -1;
+                if (!aHasComm && bHasComm) return 1;
+                // 同组内：按 sortTimestamp 倒序（最新在最上）
+                const aTs = a.sortTimestamp || a.createdAt || a.date || '';
+                const bTs = b.sortTimestamp || b.createdAt || b.date || '';
                 if (aTs && bTs) return new Date(bTs) - new Date(aTs);
                 if (aTs) return -1;
                 if (bTs) return 1;
                 return 0;
             });
+
+            // 更新日期列排序指示器
+            const indicator = document.getElementById('detailDateSortIndicator');
+            if (indicator) {
+                indicator.textContent = detailQuoteSort === 'dateAsc' ? '▲'
+                    : detailQuoteSort === 'dateDesc' ? '▼'
+                    : '▼';  // 默认模式也显示向下箭头表示"按时间戳倒序"
+            }
 
             container.innerHTML = sortedQuotes.map(q => {
                 const statusClass = q.status === 'completed' ? 'status-completed' : 'status-active';
@@ -2831,7 +2870,12 @@ function renderDetailQuoteList(quotes) {
                     commBadge = '<span style="background:#ffc107;color:#333;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 100%</span>';
                 }
 
+                // 日期显示（取 sortTimestamp 或 createdAt 或 date）
+                const displayDate = q.sortTimestamp || q.createdAt || q.date || '';
+                const dateText = displayDate ? (displayDate.substring(0, 10)) : '-';
+
                 return '<tr onclick="openQuoteDetail(\'' + escapeHtml(q.projNo) + '\')" style="cursor:pointer;">' +
+                    '<td>' + dateText + '</td>' +
                     '<td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(\'' + escapeHtml(q.projNo) + '\')" style="color:#00B3B8;">' + escapeHtml(q.projNo) + '</a></td>' +
                     '<td>' + escapeHtml(q.customerName || '-') + '</td>' +
                     '<td>RM ' + formatNumber(amount) + '</td>' +
@@ -2841,6 +2885,18 @@ function renderDetailQuoteList(quotes) {
                     '<td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')">分享</button></td>' +
                 '</tr>';
             }).join('');
+        }
+
+        // 点击日期表头切换排序：default → dateDesc → dateAsc → default → ...
+        function toggleDetailQuoteDateSort() {
+            if (detailQuoteSort === 'default') {
+                detailQuoteSort = 'dateDesc';
+            } else if (detailQuoteSort === 'dateDesc') {
+                detailQuoteSort = 'dateAsc';
+            } else {
+                detailQuoteSort = 'default';
+            }
+            renderDetailQuoteList(detailQuoteListCache);
         }
 
         // Open quote detail modal
