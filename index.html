@@ -2408,7 +2408,7 @@ quote: quote,
                     }
                     const postData = new URLSearchParams();
                     postData.append('action', 'saveQuote');
-                    postData.append('username', d.quote.username || currentCommUser || '');
+                    postData.append('username', commSettlementKey || d.quote.createdBy || currentCommUser || '');
                     postData.append('projNo', projNo);
                     postData.append('quoteData', JSON.stringify(updatedQuote));
                     
