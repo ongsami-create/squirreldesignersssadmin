@@ -1263,7 +1263,49 @@
         </div>
     </div>
 
-    
+    <!-- 撤回锁定弹窗（2026-07-24） -->
+    <div class="modal-overlay" id="withdrawModal">
+        <div class="modal" style="width:420px;max-width:95vw;">
+            <div class="modal-header">
+                <h3>撤回锁定 - <span id="withdrawProjNo"></span></h3>
+                <button class="modal-close" onclick="closeWithdrawModal()">×</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <p style="color:#666;margin-bottom:15px;font-size:13px;">
+                    选择要撤回的锁定类型。已发工资（settled50/100）和已下单（orderedAt）记录不会被撤回。
+                </p>
+                <div id="withdrawOptions" style="display:flex;flex-direction:column;gap:10px;">
+                    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
+                        <input type="radio" name="withdrawType" value="commission50" style="margin-top:3px;">
+                        <div>
+                            <div style="font-weight:600;color:#00B3B8;">撤回 50% 佣金计算锁定</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">清空 commission50SavedAt，同时联动清空 commission100SavedAt（需重新保存）</div>
+                        </div>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
+                        <input type="radio" name="withdrawType" value="commission100" style="margin-top:3px;">
+                        <div>
+                            <div style="font-weight:600;color:#00B3B8;">撤回 100% 佣金计算锁定</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">清空 commission100SavedAt（保留 50%）</div>
+                        </div>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
+                        <input type="radio" name="withdrawType" value="deposit" style="margin-top:3px;">
+                        <div>
+                            <div style="font-weight:600;color:#00B3B8;">撤回定金款项锁定</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">清空 depositLocked，允许重新编辑定金记录</div>
+                        </div>
+                    </label>
+                </div>
+                <div id="withdrawWarn" style="display:none;margin-top:15px;padding:10px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;color:#856404;font-size:13px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeWithdrawModal()">取消</button>
+                <button class="btn btn-primary" id="withdrawConfirmBtn" onclick="confirmWithdraw()" style="background:#dc3545;color:#fff;">确认撤回</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="addUserModal">
         <div class="modal">
             <div class="modal-header">
@@ -2826,8 +2868,9 @@ function renderDetailQuoteList(quotes) {
                     return 0;
                 }
                 // 默认模式：先按是否标注佣金分组
-                const aHasComm = !!(a.commission50SavedAt || a.commission100SavedAt);
-                const bHasComm = !!(b.commission50SavedAt || b.commission100SavedAt);
+                // ✅ 2026-07-26：前端 Mark（销售员勾的）OR backadmin Save 都算"有佣金"
+                const aHasComm = !!(a.commission50SavedAt || a.commission100SavedAt || a.commission50Marked || a.commission100Marked);
+                const bHasComm = !!(b.commission50SavedAt || b.commission100SavedAt || b.commission50Marked || b.commission100Marked);
                 if (aHasComm && !bHasComm) return -1;
                 if (!aHasComm && bHasComm) return 1;
                 // 同组内：按 sortTimestamp 倒序（最新在最上）
@@ -2859,8 +2902,9 @@ function renderDetailQuoteList(quotes) {
                 const debtPct = amount > 0 ? ((debt / amount) * 100).toFixed(1) + '%' : '-';
 
                 // 2026-06-24：佣金时间戳徽章（合并到状态列）
-                const has50 = !!q.commission50SavedAt;
-                const has100 = !!q.commission100SavedAt;
+                // ✅ 2026-07-26：前端 Mark（销售员勾的）OR backadmin Save 都显示徽章
+                const has50 = !!(q.commission50SavedAt || q.commission50Marked);
+                const has100 = !!(q.commission100SavedAt || q.commission100Marked);
                 let commBadge = '';
                 if (has50 && has100) {
                     commBadge = '<span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50%+100%</span>';
@@ -2882,7 +2926,10 @@ function renderDetailQuoteList(quotes) {
                     '<td>RM ' + formatNumber(debt) + '</td>' +
                     '<td>' + debtPct + '</td>' +
                     '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span>' + commBadge + '</td>' +
-                    '<td onclick="event.stopPropagation();"><button class="btn btn-sm btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')">分享</button></td>' +
+                    '<td onclick="event.stopPropagation();">' +
+                        '<button class="btn btn-sm btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')" style="margin-right:4px;">分享</button>' +
+                        '<button class="btn btn-sm" onclick="openWithdrawModal(\'' + escapeHtml(q.projNo) + '\')" style="background:#dc3545;color:#fff;">撤回</button>' +
+                    '</td>' +
                 '</tr>';
             }).join('');
         }
@@ -2898,6 +2945,106 @@ function renderDetailQuoteList(quotes) {
             }
             renderDetailQuoteList(detailQuoteListCache);
         }
+
+        // ==================== 2026-07-24 撤回锁定功能 ====================
+        let withdrawCurrentProjNo = '';
+        let withdrawCurrentUsername = '';  // 从 detailQuoteListCache 拿 quote.createdBy
+
+        function openWithdrawModal(projNo) {
+            withdrawCurrentProjNo = projNo;
+            // 从缓存里找这个 quote 的 createdBy
+            const q = (detailQuoteListCache || []).find(function(x) { return x.projNo === projNo; });
+            withdrawCurrentUsername = (q && q.createdBy) || currentEditingUser.username || '';
+
+            document.getElementById('withdrawProjNo').textContent = projNo;
+
+            // 默认勾选 commission50（如果存在）
+            const has50 = q && q.commission50SavedAt;
+            const has100 = q && q.commission100SavedAt;
+            const hasDeposit = q && q.depositLocked;
+            // 智能默认：优先选存在的
+            const radios = document.getElementsByName('withdrawType');
+            radios.forEach(function(r) { r.checked = false; });
+            if (has50) {
+                radios[0].checked = true;
+            } else if (has100) {
+                radios[1].checked = true;
+            } else if (hasDeposit) {
+                radios[2].checked = true;
+            } else {
+                // 都没有，也允许选
+                radios[0].checked = true;
+            }
+
+            // 提示哪些可撤回
+            const warn = document.getElementById('withdrawWarn');
+            if (!has50 && !has100 && !hasDeposit) {
+                warn.innerHTML = '该项目没有可撤回的锁定（commission50/100SavedAt 和 depositLocked 都不存在）。撤回将不会生效。';
+                warn.style.display = 'block';
+            } else {
+                warn.style.display = 'none';
+            }
+
+            // 禁用不存在的选项
+            radios[0].disabled = !has50;
+            radios[1].disabled = !has100;
+            radios[2].disabled = !hasDeposit;
+            radios[0].parentNode.style.opacity = has50 ? '1' : '0.5';
+            radios[1].parentNode.style.opacity = has100 ? '1' : '0.5';
+            radios[2].parentNode.style.opacity = hasDeposit ? '1' : '0.5';
+
+            document.getElementById('withdrawModal').classList.add('active');
+        }
+
+        function closeWithdrawModal() {
+            document.getElementById('withdrawModal').classList.remove('active');
+        }
+
+        async function confirmWithdraw() {
+            const typeRadio = document.querySelector('input[name="withdrawType"]:checked');
+            if (!typeRadio) {
+                showToast(currentLang === 'zh' ? '请选择撤回类型' : 'Please select a type', 'error');
+                return;
+            }
+            const type = typeRadio.value;
+            const projNo = withdrawCurrentProjNo;
+            const username = withdrawCurrentUsername;
+            if (!username) {
+                showToast('未找到报价的 createdBy 字段', 'error');
+                return;
+            }
+            if (!confirm(currentLang === 'zh' ?
+                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50%佣金锁定' : type === 'commission100' ? '100%佣金锁定' : '定金锁定') + '" 吗？' :
+                'Confirm to withdraw ' + type + ' for ' + projNo + '?')) {
+                return;
+            }
+
+            const btn = document.getElementById('withdrawConfirmBtn');
+            btn.disabled = true;
+            btn.textContent = '处理中...';
+            try {
+                const response = await fetch(GAS_URL + '?action=withdrawCommission&username=' + encodeURIComponent(username) + '&projNo=' + encodeURIComponent(projNo) + '&type=' + encodeURIComponent(type));
+                const result = await response.json();
+                if (result.success) {
+                    showToast((currentLang === 'zh' ? '已撤回：' : 'Withdrew: ') + result.message, 'success');
+                    closeWithdrawModal();
+                    // 刷新当前用户的数据
+                    if (currentEditingUser && currentEditingUser.username) {
+                        delete dataCache.userStats[currentEditingUser.username];
+                        await fetchUserData(currentEditingUser.username);
+                    }
+                } else {
+                    showToast(result.message || 'Failed', 'error');
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '确认撤回';
+            }
+        }
+
+        // ==================== 撤回锁定功能结束 ====================
 
         // Open quote detail modal
         async function openQuoteDetail(projNo) {
