@@ -1973,13 +1973,13 @@
         let commSettlementFilteredData = [];
 
         // ========== 50/100 池分配（方案 A + 时间戳分水岭） ==========
-        // 按 commission50SavedAt 时间戳切分 depositRecords：
-        //  - 早于分水岭（或分水岭未设置）→ 50 池
-        //  - 晚于或等于分水岭 → 100 池
+        // 2026-07-26 改：用 commission100At (前端 Mark 时间) 作分水岭
+        //  - commission100At 之后的定金 → 100 池
+        //  - 其他（comm100At 之前 + 任何无标记前的定金）→ 50 池
         // 退款场景按方案 A：50 池冻结时锁定佣金基数，不再回算。
         function splitDepositToPools(quote) {
             const records = (quote && quote.depositRecords) || [];
-            const splitTime = quote && quote.commission50SavedAt; // ISO string or null
+            const splitTime = quote && quote.commission100At; // 改：前端 commission100At
             let amount50 = 0, amount100 = 0;
             for (const r of records) {
                 const amt = Number(r && r.amount) || 0;
@@ -1988,10 +1988,10 @@
                     amount50 += amt;
                     continue;
                 }
-                if (!splitTime || new Date(r.date) < new Date(splitTime)) {
-                    amount50 += amt;
-                } else {
+                if (splitTime && new Date(r.date) >= new Date(splitTime)) {
                     amount100 += amt;
+                } else {
+                    amount50 += amt;
                 }
             }
             return { amount50, amount100 };
@@ -2005,10 +2005,11 @@
             const pct50OfTotal = total > 0 ? (amount50 / total) * 100 : 0;
             const is50Locked = !!quote.commission50SavedAt;
             const is100Locked = !!quote.commission100SavedAt;
-            // %(50) 可输入条件: 50 池占销售总价 > 40% 且 50 池未冻结
-            const canInput50 = pct50OfTotal > 40 && !is50Locked;
-            // %(100) 可输入条件: 100 池 > 0 且 100 池未冻结
-            const canInput100 = amount100 > 0 && !is100Locked;
+            // 2026-07-26 改：销售勾"佣金50"→ 解锁 %50 输入；勾"佣金100"→ 解锁 %100 输入
+            // %(50) 可输入: 50 池有钱 OR 销售勾了 50 Mark，且 50 池未冻结
+            const canInput50 = (amount50 > 0 || !!quote.commission50At) && !is50Locked;
+            // %(100) 可输入: 100 池有钱 OR 销售勾了 100 Mark，且 100 池未冻结
+            const canInput100 = (amount100 > 0 || !!quote.commission100At) && !is100Locked;
             return { canInput50, is50Locked, canInput100, is100Locked, pct50OfTotal, amount50, amount100 };
         }
         
@@ -2867,10 +2868,13 @@ function renderDetailQuoteList(quotes) {
                     if (bDate) return detailQuoteSort === 'dateAsc' ? 1 : -1;
                     return 0;
                 }
-                // 默认模式：先按是否标注佣金分组
-                // ✅ 2026-07-26：前端 Mark（销售员勾的）OR backadmin Save 都算"有佣金"
-                const aHasComm = !!(a.commission50SavedAt || a.commission100SavedAt || a.commission50Marked || a.commission100Marked);
-                const bHasComm = !!(b.commission50SavedAt || b.commission100SavedAt || b.commission50Marked || b.commission100Marked);
+                // 默认模式：先按是否已存佣金分组（任一角色的 %50 或 %100 有值就算"有佣金"）
+                const aP50 = (a.salespersonCommissionPct50 || 0) + (a.subSalespersonCommissionPct50 || 0) + (a.measurementEngineerCommissionPct50 || 0) + (a.designerCommissionPct50 || 0) + (a.generalManagerCommissionPct50 || 0);
+                const aP100 = (a.salespersonCommissionPct100 || 0) + (a.subSalespersonCommissionPct100 || 0) + (a.measurementEngineerCommissionPct100 || 0) + (a.designerCommissionPct100 || 0) + (a.generalManagerCommissionPct100 || 0);
+                const bP50 = (b.salespersonCommissionPct50 || 0) + (b.subSalespersonCommissionPct50 || 0) + (b.measurementEngineerCommissionPct50 || 0) + (b.designerCommissionPct50 || 0) + (b.generalManagerCommissionPct50 || 0);
+                const bP100 = (b.salespersonCommissionPct100 || 0) + (b.subSalespersonCommissionPct100 || 0) + (b.measurementEngineerCommissionPct100 || 0) + (b.designerCommissionPct100 || 0) + (b.generalManagerCommissionPct100 || 0);
+                const aHasComm = (aP50 > 0) || (aP100 > 0) || !!a.commission50SavedAt || !!a.commission100SavedAt;
+                const bHasComm = (bP50 > 0) || (bP100 > 0) || !!b.commission50SavedAt || !!b.commission100SavedAt;
                 if (aHasComm && !bHasComm) return -1;
                 if (!aHasComm && bHasComm) return 1;
                 // 同组内：按 sortTimestamp 倒序（最新在最上）
@@ -2901,13 +2905,17 @@ function renderDetailQuoteList(quotes) {
                 // 计算欠款百分比（保留1位小数）
                 const debtPct = amount > 0 ? ((debt / amount) * 100).toFixed(1) + '%' : '-';
 
-                // 2026-06-24：佣金时间戳徽章（合并到状态列）
-                // ✅ 2026-07-26：前端 Mark（销售员勾的）OR backadmin Save 都显示徽章
-                const has50 = !!(q.commission50SavedAt || q.commission50Marked);
-                const has100 = !!(q.commission100SavedAt || q.commission100Marked);
+                // 2026-07-26 改：佣金徽章改读实际保存的 pct 值（不是 Mark 标志）
+                //  - 任一角色的 %50 > 0 → 显示 50
+                //  - 任一角色的 %100 > 0 → 显示 100
+                //  - 都有 → "50 100"
+                const _p50Sum = (q.salespersonCommissionPct50 || 0) + (q.subSalespersonCommissionPct50 || 0) + (q.measurementEngineerCommissionPct50 || 0) + (q.designerCommissionPct50 || 0) + (q.generalManagerCommissionPct50 || 0);
+                const _p100Sum = (q.salespersonCommissionPct100 || 0) + (q.subSalespersonCommissionPct100 || 0) + (q.measurementEngineerCommissionPct100 || 0) + (q.designerCommissionPct100 || 0) + (q.generalManagerCommissionPct100 || 0);
+                const has50 = _p50Sum > 0;
+                const has100 = _p100Sum > 0;
                 let commBadge = '';
                 if (has50 && has100) {
-                    commBadge = '<span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50%+100%</span>';
+                    commBadge = '<span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50% 100%</span>';
                 } else if (has50) {
                     commBadge = '<span style="background:#00B3B8;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50%</span>';
                 } else if (has100) {
