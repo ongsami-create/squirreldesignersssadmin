@@ -1263,16 +1263,16 @@
         </div>
     </div>
 
-    <!-- 撤回锁定弹窗（2026-07-24，2026-07-27 扩展为 4 种类型） -->
+    <!-- 撤回锁定弹窗（2026-07-24，2026-07-27 扩展为 5 种类型） -->
     <div class="modal-overlay" id="withdrawModal">
-        <div class="modal" style="width:460px;max-width:95vw;">
+        <div class="modal" style="width:480px;max-width:95vw;">
             <div class="modal-header">
                 <h3>撤回锁定 - <span id="withdrawProjNo"></span></h3>
                 <button class="modal-close" onclick="closeWithdrawModal()">×</button>
             </div>
             <div class="modal-body" style="padding:20px;">
                 <p style="color:#666;margin-bottom:15px;font-size:13px;">
-                    选择要撤回的锁定类型。<b style="color:#dc3545;">任意一种撤回都会顺带清掉 orderedAt（已下单）和 lockedCustomer（客户锁定）</b>（如果存在）。<br>已发工资（settled50/100）记录不会被撤回。
+                    选择要撤回的锁定类型。各类型互相独立，只清自己的字段。<br>已发工资（settled50/100）和定金流水（depositRecords）永远不会被撤回。
                 </p>
                 <div id="withdrawOptions" style="display:flex;flex-direction:column;gap:10px;">
                     <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
@@ -1301,6 +1301,13 @@
                         <div>
                             <div style="font-weight:600;color:#6f42c1;">撤回定金款项锁定 100</div>
                             <div style="font-size:12px;color:#666;margin-top:3px;">报价系统解锁点击"佣金100"之前的定金输入款项，撤销紫色 佣金100 徽章（清 commission100Marked/At + depositLocked=false，保留 50% Mark）</div>
+                        </div>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
+                        <input type="radio" name="withdrawType" value="clearState" style="margin-top:3px;">
+                        <div>
+                            <div style="font-weight:600;color:#fd7e14;">撤回下单和客户锁定</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">撤销已下单（orderedAt）和客户锁定（lockedCustomer）。<b style="color:#dc3545;">只清大状态，不动任何佣金/定金字段</b>。</div>
                         </div>
                     </label>
                 </div>
@@ -2988,12 +2995,12 @@ function renderDetailQuoteList(quotes) {
 
             document.getElementById('withdrawProjNo').textContent = projNo;
 
-            // 4 种撤回类型的可用性判断
+            // 5 种撤回类型的可用性判断
             // commission50/100 → 看 commission50/100SavedAt（backadmin Save 字段）
             // deposit50 → 看 commission50Marked/At 或 commission100Marked/At 或 depositLocked
             //             （任一存在，deposit50 就能撤）
             // deposit100 → 只看 commission100Marked/At（保留 50% Mark）
-            // 【2026-07-27 通用】orderedAt / lockedCustomer 存在时，4 种类型都能用
+            // clearState → 看 orderedAt 或 lockedCustomer（只清"大状态"）
             const has50 = q && q.commission50SavedAt;
             const has100 = q && q.commission100SavedAt;
             const hasMark50 = q && (q.commission50Marked || q.commission50At);
@@ -3001,26 +3008,24 @@ function renderDetailQuoteList(quotes) {
             const hasDeposit = q && q.depositLocked;
             const canDeposit50 = hasMark50 || hasMark100 || hasDeposit;
             const canDeposit100 = hasMark100;
-            // orderedAt / lockedCustomer 存在时 → 4 种类型都能用（它们会顺带清）
+            // clearState 专用的字段判断（互不影响其他 4 个）
             const hasOrder = q && q.orderedAt;
             const hasLockedCustomer = q && q.lockedCustomer;
-            const hasState = hasOrder || hasLockedCustomer;
-            const can50 = has50 || hasState;
-            const can100 = has100 || hasState;
-            const canD50 = canDeposit50 || hasState;
-            const canD100 = canDeposit100 || hasState;
+            const canClearState = hasOrder || hasLockedCustomer;
 
             // 智能默认：优先选存在的
             const radios = document.getElementsByName('withdrawType');
             radios.forEach(function(r) { r.checked = false; });
-            if (can50) {
+            if (has50) {
                 radios[0].checked = true;
-            } else if (can100) {
+            } else if (has100) {
                 radios[1].checked = true;
-            } else if (canD50) {
+            } else if (canDeposit50) {
                 radios[2].checked = true;
-            } else if (canD100) {
+            } else if (canDeposit100) {
                 radios[3].checked = true;
+            } else if (canClearState) {
+                radios[4].checked = true;
             } else {
                 // 都没有，也允许选 commission50（会提示 nothing to withdraw）
                 radios[0].checked = true;
@@ -3028,7 +3033,7 @@ function renderDetailQuoteList(quotes) {
 
             // 提示哪些可撤回
             const warn = document.getElementById('withdrawWarn');
-            if (!can50 && !can100 && !canD50 && !canD100) {
+            if (!has50 && !has100 && !canDeposit50 && !canDeposit100 && !canClearState) {
                 warn.innerHTML = '该项目没有任何可撤回的字段（commission50/100SavedAt、Marked、depositLocked、orderedAt、lockedCustomer 都不存在）。撤回将不会生效。';
                 warn.style.display = 'block';
             } else {
@@ -3036,14 +3041,16 @@ function renderDetailQuoteList(quotes) {
             }
 
             // 禁用不存在的选项（半透明显示）
-            radios[0].disabled = !can50;
-            radios[1].disabled = !can100;
-            radios[2].disabled = !canD50;
-            radios[3].disabled = !canD100;
-            radios[0].parentNode.style.opacity = can50 ? '1' : '0.5';
-            radios[1].parentNode.style.opacity = can100 ? '1' : '0.5';
-            radios[2].parentNode.style.opacity = canD50 ? '1' : '0.5';
-            radios[3].parentNode.style.opacity = canD100 ? '1' : '0.5';
+            radios[0].disabled = !has50;
+            radios[1].disabled = !has100;
+            radios[2].disabled = !canDeposit50;
+            radios[3].disabled = !canDeposit100;
+            radios[4].disabled = !canClearState;
+            radios[0].parentNode.style.opacity = has50 ? '1' : '0.5';
+            radios[1].parentNode.style.opacity = has100 ? '1' : '0.5';
+            radios[2].parentNode.style.opacity = canDeposit50 ? '1' : '0.5';
+            radios[3].parentNode.style.opacity = canDeposit100 ? '1' : '0.5';
+            radios[4].parentNode.style.opacity = canClearState ? '1' : '0.5';
 
             document.getElementById('withdrawModal').classList.add('active');
         }
@@ -3066,7 +3073,7 @@ function renderDetailQuoteList(quotes) {
                 return;
             }
             if (!confirm(currentLang === 'zh' ?
-                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50% 佣金计算锁定' : type === 'commission100' ? '100% 佣金计算锁定' : type === 'deposit50' ? '定金款项锁定 50' : type === 'deposit100' ? '定金款项锁定 100' : type) + '" 吗？' :
+                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50% 佣金计算锁定' : type === 'commission100' ? '100% 佣金计算锁定' : type === 'deposit50' ? '定金款项锁定 50' : type === 'deposit100' ? '定金款项锁定 100' : type === 'clearState' ? '下单和客户锁定' : type) + '" 吗？' :
                 'Confirm to withdraw ' + type + ' for ' + projNo + '?')) {
                 return;
             }
