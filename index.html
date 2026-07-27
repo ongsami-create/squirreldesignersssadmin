@@ -1975,34 +1975,28 @@
         // ========== 50/100 池分配 ==========
         // 2026-07-27 改：用 commission50At (销售勾"佣金50"的时间) 作分水岭
         //  - 销售勾"佣金50"表示 50% 佣金已锁定，**之后的定金归 100 池**
-        //  - commission50At 之前的定金（含任何无标记前的定金）→ 50 池
+        //  - 之前的定金 → 50 池
         // 退款场景按方案 A：50 池冻结时锁定佣金基数，不再回算。
-        // ✅ 2026-07-27：优先用 deposit.createdAt (Squirrel Designer 存完整时间戳) 做精确比较
-        //    fallback 到 deposit.date (旧数据/只有日期)
+        // ✅ 2026-07-27 改回：按 deposit.date 与 mark 日期（YYYY-MM-DD）比较
+        //   - depDate > markDate → 100
+        //   - 其他（含同日同更早）→ 50
         function splitDepositToPools(quote) {
             const records = (quote && quote.depositRecords) || [];
             const splitTime = quote && quote.commission50At;
-            const splitDateTime = splitTime ? new Date(splitTime) : null;
+            const markDay = splitTime ? new Date(splitTime).toISOString().slice(0, 10) : null;
             let amount50 = 0, amount100 = 0;
             for (let i = 0; i < records.length; i++) {
                 const r = records[i];
                 const amt = Number(r && r.amount) || 0;
                 if (!r || !amt) continue;
-                if (splitDateTime) {
-                    // 优先用 createdAt（精确时间），fallback 用 date
-                    const depTimeStr = r.createdAt || (r.date ? new Date(r.date).toISOString() : null);
-                    if (depTimeStr) {
-                        const depTime = new Date(depTimeStr);
-                        if (depTime >= splitDateTime) {
-                            amount100 += amt;
-                        } else {
-                            amount50 += amt;
-                        }
+                if (markDay && r.date) {
+                    if (r.date > markDay) {
+                        amount100 += amt;
                     } else {
-                        amount50 += amt; // 无时间信息 → 保守归 50
+                        amount50 += amt;
                     }
                 } else {
-                    // 无 commission50At 标记 → 全归 50
+                    // 无 commission50At 或 deposit.date → 全归 50
                     amount50 += amt;
                 }
             }
