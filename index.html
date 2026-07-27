@@ -1972,14 +1972,14 @@
         let commSettlementAllData = [];
         let commSettlementFilteredData = [];
 
-        // ========== 50/100 池分配（方案 A + 时间戳分水岭） ==========
-        // 2026-07-26 改：用 commission100At (前端 Mark 时间) 作分水岭
-        //  - commission100At 之后的定金 → 100 池
-        //  - 其他（comm100At 之前 + 任何无标记前的定金）→ 50 池
+        // ========== 50/100 池分配 ==========
+        // 2026-07-27 改：用 commission50At (销售勾"佣金50"的时间) 作分水岭
+        //  - 销售勾"佣金50"表示 50% 佣金已锁定，**之后的定金归 100 池**
+        //  - commission50At 之前的定金（含任何无标记前的定金）→ 50 池
         // 退款场景按方案 A：50 池冻结时锁定佣金基数，不再回算。
         function splitDepositToPools(quote) {
             const records = (quote && quote.depositRecords) || [];
-            const splitTime = quote && quote.commission100At; // 改：前端 commission100At
+            const splitTime = quote && quote.commission50At; // 销售勾"佣金50"的时间
             let amount50 = 0, amount100 = 0;
             for (const r of records) {
                 const amt = Number(r && r.amount) || 0;
@@ -2005,11 +2005,11 @@
             const pct50OfTotal = total > 0 ? (amount50 / total) * 100 : 0;
             const is50Locked = !!quote.commission50SavedAt;
             const is100Locked = !!quote.commission100SavedAt;
-            // 2026-07-26 改：销售勾"佣金50"→ 解锁 %50 输入；勾"佣金100"→ 解锁 %100 输入
-            // %(50) 可输入: 50 池有钱 OR 销售勾了 50 Mark，且 50 池未冻结
-            const canInput50 = (amount50 > 0 || !!quote.commission50At) && !is50Locked;
-            // %(100) 可输入: 100 池有钱 OR 销售勾了 100 Mark，且 100 池未冻结
-            const canInput100 = (amount100 > 0 || !!quote.commission100At) && !is100Locked;
+            // 2026-07-27 改：只在销售勾了 Mark 时才解锁（与金额无关）
+            //  - 销售勾"佣金50" → 解锁 %50 输入
+            //  - 销售勾"佣金100" → 解锁 %100 输入
+            const canInput50 = !!quote.commission50At && !is50Locked;
+            const canInput100 = !!quote.commission100At && !is100Locked;
             return { canInput50, is50Locked, canInput100, is100Locked, pct50OfTotal, amount50, amount100 };
         }
         
@@ -2877,6 +2877,8 @@ function renderDetailQuoteList(quotes) {
                 const bHasComm = (bP50 > 0) || (bP100 > 0) || !!b.commission50SavedAt || !!b.commission100SavedAt;
                 if (aHasComm && !bHasComm) return -1;
                 if (!aHasComm && bHasComm) return 1;
+                if (aHasComm && !bHasComm) return -1;
+                if (!aHasComm && bHasComm) return 1;
                 // 同组内：按 sortTimestamp 倒序（最新在最上）
                 const aTs = a.sortTimestamp || a.createdAt || a.date || '';
                 const bTs = b.sortTimestamp || b.createdAt || b.date || '';
@@ -2905,21 +2907,28 @@ function renderDetailQuoteList(quotes) {
                 // 计算欠款百分比（保留1位小数）
                 const debtPct = amount > 0 ? ((debt / amount) * 100).toFixed(1) + '%' : '-';
 
-                // 2026-07-26 改：佣金徽章改读实际保存的 pct 值（不是 Mark 标志）
-                //  - 任一角色的 %50 > 0 → 显示 50
-                //  - 任一角色的 %100 > 0 → 显示 100
-                //  - 都有 → "50 100"
+                // 2026-07-27 改：两类徽章分开显示
+                //  - ✓ 50% / ✓ 100% : admin 在 backadmin 输入了佣金（读实际 pct 值）
+                //  - 佣金50 / 佣金100 : 销售在 Squirrel Designer 勾了 Mark
                 const _p50Sum = (q.salespersonCommissionPct50 || 0) + (q.subSalespersonCommissionPct50 || 0) + (q.measurementEngineerCommissionPct50 || 0) + (q.designerCommissionPct50 || 0) + (q.generalManagerCommissionPct50 || 0);
                 const _p100Sum = (q.salespersonCommissionPct100 || 0) + (q.subSalespersonCommissionPct100 || 0) + (q.measurementEngineerCommissionPct100 || 0) + (q.designerCommissionPct100 || 0) + (q.generalManagerCommissionPct100 || 0);
-                const has50 = _p50Sum > 0;
-                const has100 = _p100Sum > 0;
+                const has50Input = _p50Sum > 0;
+                const has100Input = _p100Sum > 0;
+                const has50Mark = !!q.commission50Marked;
+                const has100Mark = !!q.commission100Marked;
                 let commBadge = '';
-                if (has50 && has100) {
-                    commBadge = '<span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50% 100%</span>';
-                } else if (has50) {
+                if (has50Input && has100Input) {
+                    commBadge = '<span style="background:#28a745;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50% ✓ 100%</span>';
+                } else if (has50Input) {
                     commBadge = '<span style="background:#00B3B8;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 50%</span>';
-                } else if (has100) {
+                } else if (has100Input) {
                     commBadge = '<span style="background:#ffc107;color:#333;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">✓ 100%</span>';
+                }
+                if (has50Mark) {
+                    commBadge += '<span style="background:#6f42c1;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">佣金50</span>';
+                }
+                if (has100Mark) {
+                    commBadge += '<span style="background:#6f42c1;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">佣金100</span>';
                 }
 
                 // 日期显示（取 sortTimestamp 或 createdAt 或 date）
