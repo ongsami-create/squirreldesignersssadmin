@@ -1263,9 +1263,9 @@
         </div>
     </div>
 
-    <!-- 撤回锁定弹窗（2026-07-24） -->
+    <!-- 撤回锁定弹窗（2026-07-24，2026-07-27 扩展为 4 种类型） -->
     <div class="modal-overlay" id="withdrawModal">
-        <div class="modal" style="width:420px;max-width:95vw;">
+        <div class="modal" style="width:460px;max-width:95vw;">
             <div class="modal-header">
                 <h3>撤回锁定 - <span id="withdrawProjNo"></span></h3>
                 <button class="modal-close" onclick="closeWithdrawModal()">×</button>
@@ -1279,21 +1279,28 @@
                         <input type="radio" name="withdrawType" value="commission50" style="margin-top:3px;">
                         <div>
                             <div style="font-weight:600;color:#00B3B8;">撤回 50% 佣金计算锁定</div>
-                            <div style="font-size:12px;color:#666;margin-top:3px;">清空 commission50SavedAt，同时联动清空 commission100SavedAt（需重新保存）</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">解锁 50% 和 100% 佣金输入栏，撤销青色的 ✓ 50% / ✓ 100% 徽章（清 commission50SavedAt，联动清 commission100SavedAt）</div>
                         </div>
                     </label>
                     <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
                         <input type="radio" name="withdrawType" value="commission100" style="margin-top:3px;">
                         <div>
                             <div style="font-weight:600;color:#00B3B8;">撤回 100% 佣金计算锁定</div>
-                            <div style="font-size:12px;color:#666;margin-top:3px;">清空 commission100SavedAt（保留 50%）</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">解锁 100% 佣金输入栏，撤销青色的 ✓ 100% 徽章（清 commission100SavedAt，保留 50%）</div>
                         </div>
                     </label>
                     <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
-                        <input type="radio" name="withdrawType" value="deposit" style="margin-top:3px;">
+                        <input type="radio" name="withdrawType" value="deposit50" style="margin-top:3px;">
                         <div>
-                            <div style="font-weight:600;color:#00B3B8;">撤回定金款项锁定</div>
-                            <div style="font-size:12px;color:#666;margin-top:3px;">清空 depositLocked，允许重新编辑定金记录</div>
+                            <div style="font-weight:600;color:#6f42c1;">撤回定金款项锁定 50</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">报价系统的定金款项全部解锁，撤销紫色 佣金50 和 佣金100 徽章（清 commission50Marked/At + commission100Marked/At + depositLocked=false）</div>
+                        </div>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
+                        <input type="radio" name="withdrawType" value="deposit100" style="margin-top:3px;">
+                        <div>
+                            <div style="font-weight:600;color:#6f42c1;">撤回定金款项锁定 100</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">报价系统解锁点击"佣金100"之前的定金输入款项，撤销紫色 佣金100 徽章（清 commission100Marked/At + depositLocked=false，保留 50% Mark）</div>
                         </div>
                     </label>
                 </div>
@@ -2981,10 +2988,19 @@ function renderDetailQuoteList(quotes) {
 
             document.getElementById('withdrawProjNo').textContent = projNo;
 
-            // 默认勾选 commission50（如果存在）
+            // 4 种撤回类型的可用性判断
+            // commission50/100 → 看 commission50/100SavedAt（backadmin Save 字段）
+            // deposit50 → 看 commission50Marked/At 或 commission100Marked/At 或 depositLocked
+            //             （任一存在，deposit50 就能撤）
+            // deposit100 → 只看 commission100Marked/At（保留 50% Mark）
             const has50 = q && q.commission50SavedAt;
             const has100 = q && q.commission100SavedAt;
+            const hasMark50 = q && (q.commission50Marked || q.commission50At);
+            const hasMark100 = q && (q.commission100Marked || q.commission100At);
             const hasDeposit = q && q.depositLocked;
+            const canDeposit50 = hasMark50 || hasMark100 || hasDeposit;
+            const canDeposit100 = hasMark100;
+
             // 智能默认：优先选存在的
             const radios = document.getElementsByName('withdrawType');
             radios.forEach(function(r) { r.checked = false; });
@@ -2992,29 +3008,33 @@ function renderDetailQuoteList(quotes) {
                 radios[0].checked = true;
             } else if (has100) {
                 radios[1].checked = true;
-            } else if (hasDeposit) {
+            } else if (canDeposit50) {
                 radios[2].checked = true;
+            } else if (canDeposit100) {
+                radios[3].checked = true;
             } else {
-                // 都没有，也允许选
+                // 都没有，也允许选 commission50（会提示 nothing to withdraw）
                 radios[0].checked = true;
             }
 
             // 提示哪些可撤回
             const warn = document.getElementById('withdrawWarn');
-            if (!has50 && !has100 && !hasDeposit) {
-                warn.innerHTML = '该项目没有可撤回的锁定（commission50/100SavedAt 和 depositLocked 都不存在）。撤回将不会生效。';
+            if (!has50 && !has100 && !canDeposit50 && !canDeposit100) {
+                warn.innerHTML = '该项目没有任何可撤回的锁定（commission50/100SavedAt、commission50/100Marked、depositLocked 都不存在）。撤回将不会生效。';
                 warn.style.display = 'block';
             } else {
                 warn.style.display = 'none';
             }
 
-            // 禁用不存在的选项
+            // 禁用不存在的选项（半透明显示）
             radios[0].disabled = !has50;
             radios[1].disabled = !has100;
-            radios[2].disabled = !hasDeposit;
+            radios[2].disabled = !canDeposit50;
+            radios[3].disabled = !canDeposit100;
             radios[0].parentNode.style.opacity = has50 ? '1' : '0.5';
             radios[1].parentNode.style.opacity = has100 ? '1' : '0.5';
-            radios[2].parentNode.style.opacity = hasDeposit ? '1' : '0.5';
+            radios[2].parentNode.style.opacity = canDeposit50 ? '1' : '0.5';
+            radios[3].parentNode.style.opacity = canDeposit100 ? '1' : '0.5';
 
             document.getElementById('withdrawModal').classList.add('active');
         }
@@ -3037,7 +3057,7 @@ function renderDetailQuoteList(quotes) {
                 return;
             }
             if (!confirm(currentLang === 'zh' ?
-                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50%佣金锁定' : type === 'commission100' ? '100%佣金锁定' : '定金锁定') + '" 吗？' :
+                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50% 佣金计算锁定' : type === 'commission100' ? '100% 佣金计算锁定' : type === 'deposit50' ? '定金款项锁定 50' : type === 'deposit100' ? '定金款项锁定 100' : type) + '" 吗？' :
                 'Confirm to withdraw ' + type + ' for ' + projNo + '?')) {
                 return;
             }
