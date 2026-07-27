@@ -1977,36 +1977,29 @@
         //  - 销售勾"佣金50"表示 50% 佣金已锁定，**之后的定金归 100 池**
         //  - commission50At 之前的定金（含任何无标记前的定金）→ 50 池
         // 退款场景按方案 A：50 池冻结时锁定佣金基数，不再回算。
-        // ⚠️ Squirrel Designer 定金只存日期"YYYY-MM-DD"无时间，所以同日多条时按数组顺序区分
-        //   - 第 1 条（i=0）→ 50 池
-        //   - 第 2+ 条（i>0）→ 100 池
+        // ✅ 2026-07-27：优先用 deposit.createdAt (Squirrel Designer 存完整时间戳) 做精确比较
+        //    fallback 到 deposit.date (旧数据/只有日期)
         function splitDepositToPools(quote) {
             const records = (quote && quote.depositRecords) || [];
-            const splitTime = quote && quote.commission50At; // 销售勾"佣金50"的时间
-            const splitDate = splitTime ? new Date(splitTime) : null;
+            const splitTime = quote && quote.commission50At;
+            const splitDateTime = splitTime ? new Date(splitTime) : null;
             let amount50 = 0, amount100 = 0;
             for (let i = 0; i < records.length; i++) {
                 const r = records[i];
                 const amt = Number(r && r.amount) || 0;
                 if (!r || !amt) continue;
-                if (!r.date) {
-                    amount50 += amt;
-                    continue;
-                }
-                const depDate = new Date(r.date);
-                if (splitDate) {
-                    // 比较逻辑：日期严格在分水岭之后 → 100
-                    // 同日（年月日相等）→ 用数组顺序（第 1 条 50，第 2+ 条 100）
-                    const sameDay = depDate.getFullYear() === splitDate.getFullYear()
-                        && depDate.getMonth() === splitDate.getMonth()
-                        && depDate.getDate() === splitDate.getDate();
-                    if (sameDay) {
-                        if (i === 0) amount50 += amt;
-                        else amount100 += amt;
-                    } else if (depDate > splitDate) {
-                        amount100 += amt;
+                if (splitDateTime) {
+                    // 优先用 createdAt（精确时间），fallback 用 date
+                    const depTimeStr = r.createdAt || (r.date ? new Date(r.date).toISOString() : null);
+                    if (depTimeStr) {
+                        const depTime = new Date(depTimeStr);
+                        if (depTime >= splitDateTime) {
+                            amount100 += amt;
+                        } else {
+                            amount50 += amt;
+                        }
                     } else {
-                        amount50 += amt;
+                        amount50 += amt; // 无时间信息 → 保守归 50
                     }
                 } else {
                     // 无 commission50At 标记 → 全归 50
