@@ -1992,25 +1992,22 @@
         //  - 之前的定金 → 50 池
         // 退款场景按方案 A：50 池冻结时锁定佣金基数，不再回算。
         // ✅ 2026-07-27 改回：按 deposit.date 与 mark 日期（YYYY-MM-DD）比较
-        //   - depDate > markDate → 100
-        //   - 其他（含同日同更早）→ 50
+        // 2026-07-29 改：按 pool 字段分（不再用日期分水岭）
+        //   - pool === '100' → 100 池
+        //   - 其他（含 '50' / undefined / 旧数据无 pool 字段）→ 50 池
+        // 老数据兼容：迁移脚本会按日期规则批量加 pool 字段；
+        //           没跑迁移的 quote 全归 50 池（不会算错佣金，但可能 50 池偏大）
         function splitDepositToPools(quote) {
             const records = (quote && quote.depositRecords) || [];
-            const splitTime = quote && quote.commission50At;
-            const markDay = splitTime ? new Date(splitTime).toISOString().slice(0, 10) : null;
             let amount50 = 0, amount100 = 0;
             for (let i = 0; i < records.length; i++) {
                 const r = records[i];
                 const amt = Number(r && r.amount) || 0;
                 if (!r || !amt) continue;
-                if (markDay && r.date) {
-                    if (r.date > markDay) {
-                        amount100 += amt;
-                    } else {
-                        amount50 += amt;
-                    }
+                if (r.pool === '100') {
+                    amount100 += amt;
                 } else {
-                    // 无 commission50At 或 deposit.date → 全归 50
+                    // 默认 50（兼容老数据 + 显式 '50'）
                     amount50 += amt;
                 }
             }
