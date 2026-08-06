@@ -3056,8 +3056,25 @@ function renderDetailQuoteList(quotes) {
             //             （任一存在，deposit50 就能撤）
             // deposit100 → 只看 commission100Marked/At（保留 50% Mark）
             // clearState → 看 orderedAt 或 lockedCustomer（只清"大状态"）
-            const has50 = q && q.commission50SavedAt;
-            const has100 = q && q.commission100SavedAt;
+            // ✅ 2026-08-06 改：has50/has100 也要看 Pct 字段（不只是 Save）
+            // 场景：admin 输了 Pct 但没保存（Pct>0 Save=null），commission50 仍能清 Pct → 徽章消失
+            const _pctFieldHas = (v) => v !== undefined && v !== null && Number(v) !== 0;
+            const _anyPct50 = q && (
+                _pctFieldHas(q.salespersonCommissionPct50) ||
+                _pctFieldHas(q.subSalespersonCommissionPct50) ||
+                _pctFieldHas(q.measurementEngineerCommissionPct50) ||
+                _pctFieldHas(q.designerCommissionPct50) ||
+                _pctFieldHas(q.generalManagerCommissionPct50)
+            );
+            const _anyPct100 = q && (
+                _pctFieldHas(q.salespersonCommissionPct100) ||
+                _pctFieldHas(q.subSalespersonCommissionPct100) ||
+                _pctFieldHas(q.measurementEngineerCommissionPct100) ||
+                _pctFieldHas(q.designerCommissionPct100) ||
+                _pctFieldHas(q.generalManagerCommissionPct100)
+            );
+            const has50 = q && (q.commission50SavedAt || q.commission100SavedAt || _anyPct50 || _anyPct100);
+            const has100 = q && (q.commission100SavedAt || _anyPct100);
             const hasMark50 = q && (q.commission50Marked || q.commission50At);
             const hasMark100 = q && (q.commission100Marked || q.commission100At);
             const hasDeposit = q && q.depositLocked;
