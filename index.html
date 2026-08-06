@@ -976,6 +976,9 @@
             <div class="section-header">
                 <h2 class="section-title" data-i18n="userManagement">用户管理</h2>
                 <div class="section-actions">
+                    <button class="btn btn-secondary" id="preloadAllBtn" onclick="togglePreloadAll()" title="预加载所有用户的报价数据（首次按 ~60s，之后 5 分钟内秒开）">
+                        <span id="preloadAllBtnText">⚡ 预加载所有数据</span>
+                    </button>
                     <button class="btn btn-primary" onclick="openAddUserModal()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1742,8 +1745,43 @@
             document.getElementById('userDetailsPage').classList.remove('active');
             loadUsers();
 
-            // 预加载所有用户的统计数据到缓存（后台进行，不阻塞UI）
-            preloadAllUserStats();
+            // ✅ 2026-08-06 改：默认不预加载所有用户（之前 20 用户 × 9s ≈ 60s 卡顿）
+            // 现在：点击用户行时才加载，秒开
+            // 想一次性全加载？点顶部 "⚡ 预加载所有数据" 按钮
+        }
+
+        // ✅ 2026-08-06 新增：手动触发预加载（带进度显示）
+        let _preloadRunning = false;
+        async function togglePreloadAll() {
+            const btn = document.getElementById('preloadAllBtn');
+            const text = document.getElementById('preloadAllBtnText');
+            if (_preloadRunning) {
+                showToast(currentLang === 'zh' ? '预加载已在进行中...' : 'Preload already running...', 'info');
+                return;
+            }
+            if (!users || users.length === 0) {
+                showToast('用户列表还没加载完', 'error');
+                return;
+            }
+            _preloadRunning = true;
+            btn.disabled = true;
+            const total = users.length;
+            const batchSize = 3;
+            const totalBatches = Math.ceil(total / batchSize);
+            for (let i = 0; i < total; i++) {
+                const u = users[i];
+                if (!dataCache.userStats[u.username]) {
+                    text.textContent = `⚡ 预加载中 ${i + 1}/${total} (${u.displayName || u.username})`;
+                    await fetchUserDataInBackground(u.username);
+                } else {
+                    text.textContent = `⚡ 预加载中 ${i + 1}/${total} (已缓存)`;
+                }
+            }
+            text.textContent = '✅ 预加载完成（5 分钟内有效）';
+            btn.disabled = false;
+            _preloadRunning = false;
+            // 3 秒后恢复按钮文字
+            setTimeout(() => { text.textContent = '⚡ 预加载所有数据'; }, 3000);
         }
 
         // Load users
