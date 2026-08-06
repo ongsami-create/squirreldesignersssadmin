@@ -1261,12 +1261,13 @@
             </div>
             <div class="modal-body" id="quoteDetailContent" style="max-height:70vh;overflow-y:auto;"><div style="padding:10px;font-family:Arial,sans-serif;"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#f0f0f0;border-radius:5px;text-align:center;"><div><label style="color:#666;font-size:12px;">销售总价</label><p style="font-size:18px;font-weight:700;margin:5px 0;color:#333;">RM 1,200</p></div><div><label style="color:#666;font-size:12px;">已付金额</label><p style="font-size:18px;font-weight:700;margin:5px 0;color:#28a745;">RM 200</p></div><div><label style="color:#666;font-size:12px;">欠款金额</label><p style="font-size:18px;font-weight:700;margin:5px 0;color:#c00;">RM 1,000</p></div><div><label style="color:#666;font-size:12px;">欠款百分比</label><p style="font-size:18px;font-weight:700;margin:5px 0;color:#666;">83.3%</p></div></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#f5f5f5;border-radius:5px;"><div><label style="color:#666;font-size:12px;">日期</label><p style="font-size:14px;font-weight:600;margin:5px 0;">2026-05-12 08:00</p></div><div><label style="color:#666;font-size:12px;">客户名称</label><p style="font-size:14px;font-weight:600;margin:5px 0;">smandi</p></div><div><label style="color:#666;font-size:12px;">客户IC号</label><p style="font-size:14px;font-weight:600;margin:5px 0;">12345677</p></div><div><label style="color:#666;font-size:12px;">客户电话</label><p style="font-size:14px;font-weight:600;margin:5px 0;">12345678</p></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#fff;border:1px solid #ddd;border-radius:5px;"><div><label style="color:#666;font-size:12px;">项目编号</label><p style="font-size:14px;font-weight:600;margin:5px 0;">test1111</p></div><div><label style="color:#666;font-size:12px;">销售员</label><p style="font-size:14px;font-weight:600;margin:5px 0;">TEST</p></div><div><label style="color:#666;font-size:12px;">销售员电话</label><p style="font-size:14px;font-weight:600;margin:5px 0;">987654321</p></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#fff;border:1px solid #ddd;border-radius:5px;"><div><label style="color:#666;font-size:12px;">副销售员</label><p style="font-size:14px;font-weight:600;margin:5px 0;">SAMI</p></div><div><label style="color:#666;font-size:12px;">测量工程师</label><p style="font-size:14px;font-weight:600;margin:5px 0;">SAMI</p></div><div><label style="color:#666;font-size:12px;">设计师</label><p style="font-size:14px;font-weight:600;margin:5px 0;">JOVEN</p></div></div><div style="padding:15px;background:#fafafa;border:1px solid #ddd;border-radius:5px;"><h4 style="margin:0 0 10px 0;color:#333;font-size:14px;font-weight:600;">欠款明细（定金款项）</h4><table style="width:100%;border-collapse:collapse;"><tbody><tr style="background:#e8e8e8;"><th style="padding:8px;border:1px solid #ccc;text-align:left;">日期</th><th style="padding:8px;border:1px solid #ccc;text-align:left;">RECEIPT NO</th><th style="padding:8px;border:1px solid #ccc;text-align:right;">金额</th></tr><tr><td style="padding:8px;border:1px solid #ccc;">2026-05-12 08:00</td><td style="padding:8px;border:1px solid #ccc;">-</td><td style="padding:8px;border:1px solid #ccc;text-align:right;">RM 200</td></tr></tbody></table></div><div style="padding:15px;background:#f5f5f5;border:1px solid #ddd;border-radius:5px;margin-top:15px;"><h4 style="margin:0 0 15px 0;color:#333;font-size:14px;font-weight:600;">佣金计算</h4><div style="display:grid;grid-template-columns:1fr 1fr 100px 120px;gap:10px;margin-bottom:15px;padding-bottom:10px;border-bottom:1px solid #ddd;"><div style="font-weight:600;color:#666;font-size:12px;">角色</div><div style="font-weight:600;color:#666;font-size:12px;">名字</div><div style="font-weight:600;color:#666;font-size:12px;text-align:center;">佣金%</div><div style="font-weight:600;color:#666;font-size:12px;text-align:right;">金额</div></div><div style="display:grid;grid-template-columns:1fr 1fr 100px 120px;gap:10px;margin-bottom:10px;align-items:center;"><div style="color:#333;font-size:13px;">销售员</div><div style="color:#333;font-size:13px;">TEST</div><div><input type="number" id="comm_salesperson_pct" value="2" placeholder="%" min="0" max="100" style="width:80px;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;" onchange="updateCommissionAmount(&#39;salesperson&#39;)"></div><div style="text-align:right;font-weight:600;color:#333;" id="comm_salesperson_amt">RM 24</div></div><div style="display:grid;grid-template-columns:1fr 1fr 100px 120px;gap:10px;margin-bottom:10px;align-items:center;"><div style="color:#333;font-size:13px;">副销售员</div><div style="color:#333;font-size:13px;">SAMI</div><div><input type="number" id="comm_subSalesperson_pct" value="2" placeholder="%" min="0" max="100" style="width:80px;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;" onchange="updateCommissionAmount(&#39;subSalesperson&#39;)"></div><div style="text-align:right;font-weight:600;color:#333;" id="comm_subSalesperson_amt">RM 24</div></div><div style="display:grid;grid-template-columns:1fr 1fr 100px 120px;gap:10px;margin-bottom:10px;align-items:center;"><div style="color:#333;font-size:13px;">测量工程师</div><div style="color:#333;font-size:13px;">SAMI</div><div><input type="number" id="comm_measurementEngineer_pct" value="1" placeholder="%" min="0" max="100" style="width:80px;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;" onchange="updateCommissionAmount(&#39;measurementEngineer&#39;)"></div><div style="text-align:right;font-weight:600;color:#333;" id="comm_measurementEngineer_amt">RM 12</div></div><div style="display:grid;grid-template-columns:1fr 1fr 100px 120px;gap:10px;margin-bottom:15px;align-items:center;"><div style="color:#333;font-size:13px;">设计师</div><div style="color:#333;font-size:13px;">JOVEN</div><div><input type="number" id="comm_designer_pct" value="1" placeholder="%" min="0" max="100" style="width:80px;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;" onchange="updateCommissionAmount(&#39;designer&#39;)"></div><div style="text-align:right;font-weight:600;color:#333;" id="comm_designer_amt">RM 12</div></div><button class="btn btn-primary" onclick="saveCommissionFromDetail(&#39;test1111&#39;)" style="background:#00B3B8;color:#fff;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;">保存佣金</button></div></div></div>
             <div class="modal-footer">
+                <button id="quoteDetailCompleteBtn" onclick="markQuoteCompleted()" style="background:#28a745;color:#fff;padding:10px 25px;border:none;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;">完成</button>
                 <button class="btn btn-secondary" onclick="closeQuoteDetailModal()" data-i18n="close">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- 撤回锁定弹窗（2026-07-24，2026-07-27 扩展为 5 种类型） -->
+    <!-- 撤回锁定弹窗（2026-07-24，2026-07-27 扩展为 5 种类型，2026-08-07 加 reopen 第 6 种） -->
     <div class="modal-overlay" id="withdrawModal">
         <div class="modal" style="width:480px;max-width:95vw;">
             <div class="modal-header">
@@ -1311,6 +1312,13 @@
                         <div>
                             <div style="font-weight:600;color:#fd7e14;">撤回下单和客户锁定</div>
                             <div style="font-size:12px;color:#666;margin-top:3px;">撤销已下单（orderedAt）和客户锁定（lockedCustomer）。<b style="color:#dc3545;">只清大状态，不动任何佣金/定金字段</b>。</div>
+                        </div>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;padding:10px;border:1px solid #ddd;border-radius:4px;">
+                        <input type="radio" name="withdrawType" value="reopen" style="margin-top:3px;">
+                        <div>
+                            <div style="font-weight:600;color:#20c997;">重新打开</div>
+                            <div style="font-size:12px;color:#666;margin-top:3px;">已完成（status='completed'）→ 进行中（status='active'）。<b style="color:#dc3545;">只清完成状态，不动任何其他字段</b>。</div>
                         </div>
                     </label>
                 </div>
@@ -2861,9 +2869,10 @@ quote: quote,
                 const activityData = await activityResponse.json();
 
                 // 更新缓存
+                // ✅ 2026-08-07 改：statistics 用前端重新算的（只含 depositRecords > 0 的 quote）
                 dataCache.userStats[username] = {
-                    statistics: statsData.statistics || { totalQuotes: 0, totalSales: 0, totalDebt: 0 },
-                    quotes: statsData.quotes || [],
+                    statistics: filterAndRecalcStats(statsData.quotes, statsData.statistics),
+                    quotes: statsData.quotes || [],  // 保留全量给 list 渲染时再 filter
                     activities: activityData.activities || []
                 };
             } catch (e) {
@@ -2883,9 +2892,11 @@ quote: quote,
                 const activityData = await activityResponse.json();
 
                 if (statsData.success) {
-                    document.getElementById('detailQuoteCount').textContent = statsData.statistics.totalQuotes || 0;
-                    document.getElementById('detailTotalSales').textContent = 'RM ' + formatNumber(statsData.statistics.totalSales || 0);
-                    document.getElementById('detailTotalDebt').textContent = 'RM ' + formatNumber(statsData.statistics.totalDebt || 0);
+                    // ✅ 2026-08-07 改：totals 只算有 depositRecords 的 quote
+                    const _filteredStats = filterAndRecalcStats(statsData.quotes, statsData.statistics);
+                    document.getElementById('detailQuoteCount').textContent = _filteredStats.totalQuotes || 0;
+                    document.getElementById('detailTotalSales').textContent = 'RM ' + formatNumber(_filteredStats.totalSales || 0);
+                    document.getElementById('detailTotalDebt').textContent = 'RM ' + formatNumber(_filteredStats.totalDebt || 0);
                     renderDetailQuoteList(statsData.quotes || []);
                 } else {
                     document.getElementById('detailQuoteCount').textContent = '0';
@@ -2901,9 +2912,10 @@ quote: quote,
                 }
 
                 // 保存到缓存
+                // ✅ 2026-08-07 改：statistics 用前端重新算的（只含 depositRecords > 0 的 quote）
                 dataCache.userStats[username] = {
-                    statistics: statsData.statistics || { totalQuotes: 0, totalSales: 0, totalDebt: 0 },
-                    quotes: statsData.quotes || [],
+                    statistics: filterAndRecalcStats(statsData.quotes, statsData.statistics),
+                    quotes: statsData.quotes || [],  // 保留全量给 list 渲染时再 filter
                     activities: activityData.activities || []
                 };
             } catch (e) {
@@ -2916,8 +2928,10 @@ function renderDetailQuoteList(quotes) {
             const container = document.getElementById('detailQuoteList');
             if (!container) return;
 
-            // 缓存当前 quotes（用于日期列点击排序时复用）
-            detailQuoteListCache = quotes || [];
+            // ✅ 2026-08-07 改：过滤掉无 depositRecords 的 quote（不算"已启动"，不显示在列表）
+            detailQuoteListCache = (quotes || []).filter(function(q) {
+                return q.depositRecords && q.depositRecords.length > 0;
+            });
 
             if (detailQuoteListCache.length === 0) {
                 container.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;">' +
@@ -2925,10 +2939,25 @@ function renderDetailQuoteList(quotes) {
                 return;
             }
 
-            // 2026-07-01：分组排序
-            // 有标注佣金（50 或 100 任一）排在上面，按 sortTimestamp 倒序
-            // 没标注的排在下面，按 createdAt/date 倒序
-            // detailQuoteSort === 'dateAsc' / 'dateDesc' 时覆盖为纯日期排序
+            // ✅ 2026-08-07 改：3 优先级排序
+            //   优先级 1（最上）：有 佣金 Mark 但有 ✓ 缺失（部分佣金没算）
+            //     例：✓ 50% 佣金50 佣金100（50 算了 100 没算）
+            //          佣金50 佣金100（50 + 100 都没算）
+            //          佣金50（50 没算）
+            //   优先级 2（中）：有 佣金 Mark + 全部 ✓ 都在，或没 Mark
+            //   优先级 3（最下）：已完成（status='completed'）
+            const getTier = function(q) {
+                if (q.status === 'completed') return 3;
+                const has50M = !!q.commission50Marked;
+                const has100M = !!q.commission100Marked;
+                const has50S = !!q.commission50SavedAt;
+                const has100S = !!q.commission100SavedAt;
+                const hasAnyMark = has50M || has100M;
+                if (!hasAnyMark) return 2;
+                if (has50M && !has50S) return 1;
+                if (has100M && !has100S) return 1;
+                return 2;
+            };
             const sortedQuotes = detailQuoteListCache.slice().sort(function(a, b) {
                 // 纯日期排序模式：覆盖默认分组
                 if (detailQuoteSort === 'dateAsc' || detailQuoteSort === 'dateDesc') {
@@ -2943,18 +2972,11 @@ function renderDetailQuoteList(quotes) {
                     if (bDate) return detailQuoteSort === 'dateAsc' ? 1 : -1;
                     return 0;
                 }
-                // 默认模式：先按是否已存佣金分组（任一角色的 %50 或 %100 有值就算"有佣金"）
-                const aP50 = (a.salespersonCommissionPct50 || 0) + (a.subSalespersonCommissionPct50 || 0) + (a.measurementEngineerCommissionPct50 || 0) + (a.designerCommissionPct50 || 0) + (a.generalManagerCommissionPct50 || 0);
-                const aP100 = (a.salespersonCommissionPct100 || 0) + (a.subSalespersonCommissionPct100 || 0) + (a.measurementEngineerCommissionPct100 || 0) + (a.designerCommissionPct100 || 0) + (a.generalManagerCommissionPct100 || 0);
-                const bP50 = (b.salespersonCommissionPct50 || 0) + (b.subSalespersonCommissionPct50 || 0) + (b.measurementEngineerCommissionPct50 || 0) + (b.designerCommissionPct50 || 0) + (b.generalManagerCommissionPct50 || 0);
-                const bP100 = (b.salespersonCommissionPct100 || 0) + (b.subSalespersonCommissionPct100 || 0) + (b.measurementEngineerCommissionPct100 || 0) + (b.designerCommissionPct100 || 0) + (b.generalManagerCommissionPct100 || 0);
-                const aHasComm = (aP50 > 0) || (aP100 > 0) || !!a.commission50SavedAt || !!a.commission100SavedAt;
-                const bHasComm = (bP50 > 0) || (bP100 > 0) || !!b.commission50SavedAt || !!b.commission100SavedAt;
-                if (aHasComm && !bHasComm) return -1;
-                if (!aHasComm && bHasComm) return 1;
-                if (aHasComm && !bHasComm) return -1;
-                if (!aHasComm && bHasComm) return 1;
-                // 同组内：按 sortTimestamp 倒序（最新在最上）
+                // 3 优先级排序
+                const aTier = getTier(a);
+                const bTier = getTier(b);
+                if (aTier !== bTier) return aTier - bTier;
+                // 同 tier 内：按 sortTimestamp 倒序
                 const aTs = a.sortTimestamp || a.createdAt || a.date || '';
                 const bTs = b.sortTimestamp || b.createdAt || b.date || '';
                 if (aTs && bTs) return new Date(bTs) - new Date(aTs);
@@ -2968,7 +2990,7 @@ function renderDetailQuoteList(quotes) {
             if (indicator) {
                 indicator.textContent = detailQuoteSort === 'dateAsc' ? '▲'
                     : detailQuoteSort === 'dateDesc' ? '▼'
-                    : '▼';  // 默认模式也显示向下箭头表示"按时间戳倒序"
+                    : '▼';
             }
 
             container.innerHTML = sortedQuotes.map(q => {
@@ -2976,15 +2998,11 @@ function renderDetailQuoteList(quotes) {
                 const statusText = q.status === 'completed' ?
                     (currentLang === 'zh' ? '已完成' : 'Completed') :
                     (currentLang === 'zh' ? '进行中' : 'Active');
-                // Use grandTotal/paidAmount/debt from GAS response
                 const amount = q.grandTotal !== undefined ? q.grandTotal : (q.total || 0);
                 const debt = q.debt !== undefined ? q.debt : 0;
-                // 计算欠款百分比（保留1位小数）
                 const debtPct = amount > 0 ? ((debt / amount) * 100).toFixed(1) + '%' : '-';
 
-                // 2026-07-27 改：两类徽章分开显示
-                //  - ✓ 50% / ✓ 100% : admin 在 backadmin 输入了佣金（读实际 pct 值）
-                //  - 佣金50 / 佣金100 : 销售在 Squirrel Designer 勾了 Mark
+                // 2026-07-27：两类徽章分开显示
                 const _p50Sum = (q.salespersonCommissionPct50 || 0) + (q.subSalespersonCommissionPct50 || 0) + (q.measurementEngineerCommissionPct50 || 0) + (q.designerCommissionPct50 || 0) + (q.generalManagerCommissionPct50 || 0);
                 const _p100Sum = (q.salespersonCommissionPct100 || 0) + (q.subSalespersonCommissionPct100 || 0) + (q.measurementEngineerCommissionPct100 || 0) + (q.designerCommissionPct100 || 0) + (q.generalManagerCommissionPct100 || 0);
                 const has50Input = _p50Sum > 0;
@@ -3005,8 +3023,11 @@ function renderDetailQuoteList(quotes) {
                 if (has100Mark) {
                     commBadge += '<span style="background:#6f42c1;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">佣金100</span>';
                 }
+                // ✅ 2026-08-07 新增：橙色「下单」徽章（基于 orderedAt）
+                if (q.orderedAt) {
+                    commBadge += '<span style="background:#fd7e14;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:4px;">下单</span>';
+                }
 
-                // 日期显示（取 sortTimestamp 或 createdAt 或 date）
                 const displayDate = q.sortTimestamp || q.createdAt || q.date || '';
                 const dateText = displayDate ? (displayDate.substring(0, 10)) : '-';
 
@@ -3084,6 +3105,9 @@ function renderDetailQuoteList(quotes) {
             const hasOrder = q && q.orderedAt;
             const hasLockedCustomer = q && q.lockedCustomer;
             const canClearState = hasOrder || hasLockedCustomer;
+            // ✅ 2026-08-07 新增：reopen 专用（status==='completed' 才能用）
+            const isCompleted = q && q.status === 'completed';
+            const canReopen = isCompleted;
 
             // 智能默认：优先选存在的
             const radios = document.getElementsByName('withdrawType');
@@ -3098,6 +3122,8 @@ function renderDetailQuoteList(quotes) {
                 radios[3].checked = true;
             } else if (canClearState) {
                 radios[4].checked = true;
+            } else if (canReopen) {
+                radios[5].checked = true;
             } else {
                 // 都没有，也允许选 commission50（会提示 nothing to withdraw）
                 radios[0].checked = true;
@@ -3105,8 +3131,8 @@ function renderDetailQuoteList(quotes) {
 
             // 提示哪些可撤回
             const warn = document.getElementById('withdrawWarn');
-            if (!has50 && !has100 && !canDeposit50 && !canDeposit100 && !canClearState) {
-                warn.innerHTML = '该项目没有任何可撤回的字段（commission50/100SavedAt、Marked、depositLocked、orderedAt、lockedCustomer 都不存在）。撤回将不会生效。';
+            if (!has50 && !has100 && !canDeposit50 && !canDeposit100 && !canClearState && !canReopen) {
+                warn.innerHTML = '该项目没有任何可撤回的字段（commission50/100SavedAt、Marked、depositLocked、orderedAt、lockedCustomer、status 都不存在）。撤回将不会生效。';
                 warn.style.display = 'block';
             } else {
                 warn.style.display = 'none';
@@ -3118,11 +3144,13 @@ function renderDetailQuoteList(quotes) {
             radios[2].disabled = !canDeposit50;
             radios[3].disabled = !canDeposit100;
             radios[4].disabled = !canClearState;
+            radios[5].disabled = !canReopen;
             radios[0].parentNode.style.opacity = has50 ? '1' : '0.5';
             radios[1].parentNode.style.opacity = has100 ? '1' : '0.5';
             radios[2].parentNode.style.opacity = canDeposit50 ? '1' : '0.5';
             radios[3].parentNode.style.opacity = canDeposit100 ? '1' : '0.5';
             radios[4].parentNode.style.opacity = canClearState ? '1' : '0.5';
+            radios[5].parentNode.style.opacity = canReopen ? '1' : '0.5';
 
             document.getElementById('withdrawModal').classList.add('active');
         }
@@ -3145,7 +3173,7 @@ function renderDetailQuoteList(quotes) {
                 return;
             }
             if (!confirm(currentLang === 'zh' ?
-                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50% 佣金计算锁定' : type === 'commission100' ? '100% 佣金计算锁定' : type === 'deposit50' ? '定金款项锁定 50' : type === 'deposit100' ? '定金款项锁定 100' : type === 'clearState' ? '下单和客户锁定' : type) + '" 吗？' :
+                '确定要撤回 ' + projNo + ' 的 "' + (type === 'commission50' ? '50% 佣金计算锁定' : type === 'commission100' ? '100% 佣金计算锁定' : type === 'deposit50' ? '定金款项锁定 50' : type === 'deposit100' ? '定金款项锁定 100' : type === 'clearState' ? '下单和客户锁定' : type === 'reopen' ? '已完成 → 进行中（重新打开）' : type) + '" 吗？' :
                 'Confirm to withdraw ' + type + ' for ' + projNo + '?')) {
                 return;
             }
@@ -3192,12 +3220,76 @@ function renderDetailQuoteList(quotes) {
                 const data = await response.json();
                 if (data.success && data.quote) {
                     renderQuoteDetailModal(data.quote);
+                    // ✅ 2026-08-07 设置"完成"按钮状态（Close 左侧的绿色按钮）
+                    const completeBtn = document.getElementById('quoteDetailCompleteBtn');
+                    if (completeBtn) {
+                        const isCompleted = data.quote.status === 'completed';
+                        completeBtn.textContent = isCompleted
+                            ? (currentLang === 'zh' ? '已完成 ✓' : 'Completed ✓')
+                            : (currentLang === 'zh' ? '完成' : 'Mark Completed');
+                        completeBtn.disabled = isCompleted;
+                        completeBtn.style.opacity = isCompleted ? '0.5' : '1';
+                        completeBtn.style.cursor = isCompleted ? 'not-allowed' : 'pointer';
+                    }
                 } else {
                     content.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">' + (currentLang === 'zh' ? '无法加载报价详情' : 'Unable to load quote details') + '</p>';
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error('Error loading quote detail:', e);
                 content.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">' + (currentLang === 'zh' ? '加载失败' : 'Failed to load') + '</p>';
+            }
+        }
+
+        // ✅ 2026-08-07 新增：点击 Quote Details 的「完成」按钮
+        //   调用 GAS markQuoteCompleted action（v3.12 实现）→ status='completed' + completedAt + completedBy
+        //   「撤回」弹窗里用「重新打开」radio 可以撤回此操作
+        async function markQuoteCompleted() {
+            const detail = window.currentQuoteDetail;
+            const projNo = (detail && detail.projNo) || '';
+            if (!projNo) {
+                showToast(currentLang === 'zh' ? '未找到项目编号' : 'Project number not found', 'error');
+                return;
+            }
+            const username = (detail && detail.createdBy) || (currentEditingUser && currentEditingUser.username) || '';
+            if (!username) {
+                showToast(currentLang === 'zh' ? '未找到报价的 createdBy 字段' : 'Quote owner not found', 'error');
+                return;
+            }
+            if (!confirm(currentLang === 'zh'
+                ? '确定将 ' + projNo + ' 标记为「已完成」？\n\n此操作会写入完成时间戳和操作人，可在「撤回」弹窗里用「重新打开」撤回。'
+                : 'Mark ' + projNo + ' as completed? This writes a completion timestamp and can be reverted via "Reopen" in Withdraw modal.')) {
+                return;
+            }
+            const btn = document.getElementById('quoteDetailCompleteBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = currentLang === 'zh' ? '处理中...' : 'Processing...';
+            }
+            try {
+                const response = await fetch(GAS_URL + '?action=markQuoteCompleted&username=' + encodeURIComponent(username) + '&projNo=' + encodeURIComponent(projNo));
+                const result = await response.json();
+                if (result.success) {
+                    showToast(currentLang === 'zh' ? '已标记为「已完成」' : 'Marked as completed', 'success');
+                    // 清除 cache 并刷新当前用户数据（list 里的 status 会更新成「已完成」）
+                    if (currentEditingUser && currentEditingUser.username) {
+                        delete dataCache.userStats[currentEditingUser.username];
+                        await fetchUserData(currentEditingUser.username);
+                    }
+                    // 重新打开 detail modal 用新状态
+                    openQuoteDetail(projNo);
+                } else {
+                    showToast(result.message || 'Failed', 'error');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = currentLang === 'zh' ? '完成' : 'Mark Completed';
+                    }
+                }
+            } catch (e) {
+                showToast('Error: ' + e.message, 'error');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = currentLang === 'zh' ? '完成' : 'Mark Completed';
+                }
             }
         }
 
@@ -4237,6 +4329,19 @@ deductCommissionPct: deductCommissionPct,
                 day: '2-digit',
                 hour: '2-digit',
                 minute: '2-digit'
+            });
+        }
+
+        // ✅ 2026-08-07 新增：totals 只算有 depositRecords 的 quote（与列表过滤保持一致）
+        //   无"欠款明细（定金款项）"的 quote 不算"已启动"，不计入总额/欠款
+        function filterAndRecalcStats(quotes, originalStats) {
+            const _filtered = (quotes || []).filter(q => q.depositRecords && q.depositRecords.length > 0);
+            const _totalSales = _filtered.reduce((s, q) => s + (q.grandTotal || 0), 0);
+            const _totalDebt = _filtered.reduce((s, q) => s + ((q.grandTotal || 0) - (q.paidAmount || 0)), 0);
+            return Object.assign({}, originalStats || {}, {
+                totalQuotes: _filtered.length,
+                totalSales: _totalSales,
+                totalDebt: _totalDebt
             });
         }
 
