@@ -1751,7 +1751,9 @@
         }
 
         // ✅ 2026-08-06 新增：手动触发预加载（带进度显示）
-        // 2026-08-06 改：用 getAllUsersStatistics 一次返回（替代 20 次串行调用）
+        // 2026-08-06 改：用 getAllUserStatsCache 读 N 个小文件（秒开）
+        //   第一次（无 cache）：先 buildAllUserStatsCache 主动 build（~120s，写 cache 到 Drive）
+        //   之后：直接读 cache（< 2s，N 个 1-3KB 小文件）
         let _preloadRunning = false;
         async function togglePreloadAll() {
             const btn = document.getElementById('preloadAllBtn');
@@ -1767,21 +1769,27 @@
             _preloadRunning = true;
             btn.disabled = true;
             const t0 = Date.now();
-            text.textContent = '⚡ 预加载中... (GAS 端处理中)';
+            text.textContent = '⚡ 预加载中...';
             try {
-                const response = await fetch(GAS_URL + '?action=getAllUsersStatistics');
-                const data = await response.json();
-                if (!data.success) throw new Error(data.message || 'Unknown error');
-                // 填充缓存
+                // 第一次：先 build cache（~120s，写 20 个小 JSON 到 Drive）
+                text.textContent = '⚡ 首次预加载：构建 cache (~120秒)...';
+                const buildResp = await fetch(GAS_URL + '?action=buildAllUserStatsCache');
+                const buildData = await buildResp.json();
+                if (!buildData.success) throw new Error(buildData.message || 'build failed');
+                // 第二次：读 cache（< 2s，N 个小文件）
+                text.textContent = '⚡ 读 cache...';
+                const readResp = await fetch(GAS_URL + '?action=getAllUserStatsCache');
+                const data = await readResp.json();
+                if (!data.success) throw new Error(data.message || 'read failed');
                 for (const u of data.users) {
                     dataCache.userStats[u.username] = {
                         statistics: u.statistics,
                         quotes: u.quotes,
-                        activities: []  // 活动日志仍按需懒加载
+                        activities: []
                     };
                 }
                 const dt = ((Date.now() - t0) / 1000).toFixed(1);
-                text.textContent = `✅ 预加载完成 (${data.users.length} 用户, ${dt}秒, 5分钟内有效)`;
+                text.textContent = `✅ 预加载完成 (${data.users.length} 用户, ${dt}秒)`;
                 showToast(currentLang === 'zh'
                     ? `预加载完成：${data.users.length} 用户 / ${dt}秒`
                     : `Preload done: ${data.users.length} users / ${dt}s`, 'success');
@@ -1792,7 +1800,6 @@
             } finally {
                 btn.disabled = false;
                 _preloadRunning = false;
-                // 5 秒后恢复按钮文字
                 setTimeout(() => { text.textContent = '⚡ 预加载所有数据'; }, 5000);
             }
         }
