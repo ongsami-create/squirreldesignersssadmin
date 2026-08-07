@@ -2487,12 +2487,12 @@ quote: quote,
         async function markCommSettled(type) {
             const lang = currentLang === 'zh';
             const checkedBoxes = document.querySelectorAll('.comm-cb:checked');
-            
+
             if (checkedBoxes.length === 0) {
                 alert(lang?'请先选择要结算的项目':'Please select projects to settle');
                 return;
             }
-            
+
             // 业务规则 (2026-06-16)：未标"50%已结算"前不能标"100%已结算"
             // 修复：用 settled50[commSettlementKey]（按用户），不是 commission50SavedAt
             if (type === 100) {
@@ -2509,18 +2509,23 @@ quote: quote,
                     return;
                 }
             }
-            
+
             const settleLabel = type === 50 ? '50%' : '100%';
             let successCount = 0;
             let errorCount = 0;
-            
+
             for (const cb of checkedBoxes) {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
                 if (!d || !d.quote) continue;
-                
+
                 try {
                     const projNo = d.quote.projNo;
+                    // ✅ 2026-08-07 改：用 quote.createdBy 优先于 commSettlementKey
+                    // 原因：admin 在 FSD 账号下打开了 JSD01（被错位写入 FSD 目录），如果用 commSettlementKey='FSD'
+                    //   写盘，会把 JSD01 写到 FSD 目录（污染扩散）。用 quote.createdBy='JSD' 写到正确目录
+                    // fallback 顺序：createdBy（原始归属）→ commSettlementKey（当前结算 user）→ currentCommUser
+                    const realOwner = d.quote.createdBy || commSettlementKey || currentCommUser || '';
                     // 修复 (2026-06-16)：写 settled50/settled100[username] = true（按用户的发工资标志）
                     // 而不是写 commission50SavedAt/100SavedAt（那个是 Quote Details 保存佣金 % 的时间戳，不应联动）
                     // GAS 端 saveQuote v3.1 patched 已支持 Object.assign 写任意字段
@@ -2534,7 +2539,7 @@ quote: quote,
                     }
                     const postData = new URLSearchParams();
                     postData.append('action', 'saveQuote');
-                    postData.append('username', commSettlementKey || d.quote.createdBy || currentCommUser || '');
+                    postData.append('username', realOwner);
                     postData.append('projNo', projNo);
                     postData.append('quoteData', JSON.stringify(updatedQuote));
                     
@@ -3981,7 +3986,9 @@ deductCommissionPct: deductCommissionPct,
                     const _fullQuote = Object.assign({}, quote, commissionData);
                     const _postBody = new URLSearchParams();
                     _postBody.append('action', 'saveQuote');
-                    _postBody.append('username', quote.createdBy || 'test');
+                    // ✅ 2026-08-07 改：username 用 quote.createdBy 优先（不再 hardcoded 'test'）
+                    //   createdBy 为空时 fallback 到 admin 当前查看的 user，避免错位写入
+                    _postBody.append('username', ownerUsername);
                     _postBody.append('projNo', projNo);
                     _postBody.append('quoteData', JSON.stringify(_fullQuote));
 
