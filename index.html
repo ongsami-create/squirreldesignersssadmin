@@ -1494,19 +1494,22 @@
                         <button class="btn btn-sm btn-info" onclick="exportCommSettlementExcel()" style="background:#28a745;color:#fff;">📊 导出Excel</button>
                     </div>
                 </div>
-                <!-- ✅ 2026-08-08 优化：顶部 badge + "显示已结算"复选框（批 1 + 批 2） -->
-                <div id="commSettlementBadge" style="margin:8px 0;padding:8px 12px;background:#f0f8ff;border-radius:4px;display:flex;justify-content:space-between;align-items:center;font-size:13px;">
-                    <span>
-                        <span style="color:#00B3B8;font-weight:700;" id="commBadgeUnsettled">未结算 0</span>
-                        <span style="margin:0 8px;color:#999;">|</span>
-                        <span style="color:#28a745;" id="commBadgeSettled">已结算 0</span>
-                        <span style="margin:0 8px;color:#999;">|</span>
-                        <span style="color:#666;" id="commBadgeTotal">共 0</span>
-                    </span>
-                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:#666;">
-                        <input type="checkbox" id="commShowSettled" onchange="reloadCommSettlementData()" />
-                        <span>显示已结算</span>
-                    </label>
+                <!-- ✅ 2026-08-08 优化：3-tab 切换 + 数字 badge（批 2.1） -->
+                <div id="commSettlementBadge" style="margin:8px 0;padding:8px 12px;background:#f0f8ff;border-radius:4px;">
+                    <div style="display:flex;gap:0;margin-bottom:8px;">
+                        <button class="comm-tab-btn active" data-tab="unsettled" onclick="switchCommSettleTab('unsettled')" id="commTabUnsettled" style="flex:1;padding:8px 12px;border:1px solid #00B3B8;background:#00B3B8;color:#fff;border-radius:4px 0 0 4px;cursor:pointer;font-size:13px;font-weight:600;">
+                            未结算 <span id="commTabUnsettledCount" style="background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:8px;margin-left:4px;">0</span>
+                        </button>
+                        <button class="comm-tab-btn" data-tab="settled" onclick="switchCommSettleTab('settled')" id="commTabSettled" style="flex:1;padding:8px 12px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:0;cursor:pointer;font-size:13px;font-weight:600;">
+                            已结算 <span id="commTabSettledCount" style="background:rgba(40,167,69,0.15);padding:1px 6px;border-radius:8px;margin-left:4px;">0</span>
+                        </button>
+                        <button class="comm-tab-btn" data-tab="all" onclick="switchCommSettleTab('all')" id="commTabAll" style="flex:1;padding:8px 12px;border:1px solid #666;background:#fff;color:#666;border-radius:0 4px 4px 0;cursor:pointer;font-size:13px;font-weight:600;">
+                            全部 <span id="commTabAllCount" style="background:rgba(102,102,102,0.15);padding:1px 6px;border-radius:8px;margin-left:4px;">0</span>
+                        </button>
+                    </div>
+                    <div style="font-size:11px;color:#999;text-align:right;">
+                        <span id="commCacheStatus">未缓存</span> · <span id="commCacheTimestamp"></span>
+                    </div>
                 </div>
                 <!-- 数据表格 -->
                 <div id="commSettlementContent" style="max-height:55vh;overflow:auto;">
@@ -2125,31 +2128,90 @@
             return map[label] || label;
         }
 
-        // ✅ 2026-08-08 优化：刷新佣金结算数据（用于"显示已结算"切换）
-        // 只更新数据 + badge，不重置整个 modal
-        async function reloadCommSettlementData() {
+        // ✅ 2026-08-08 批 2：3-tab 切换 + 增量缓存
+        // 缓存策略：localStorage 5 分钟内不重复拉
+        //   key: 'commCache_${username}_${tab}'  (tab = unsettled/settled/all)
+        //   value: { quotes, totalUnsettled, totalSettled, timestamp }
+        let _currentCommTab = 'unsettled'; // 当前选中的 tab
+
+        // tab 切换
+        function switchCommSettleTab(tab) {
+            _currentCommTab = tab;
+            // 更新 tab 按钮高亮
+            const tabs = document.querySelectorAll('.comm-tab-btn');
+            tabs.forEach(function(btn) {
+                const isActive = btn.dataset.tab === tab;
+                const color = btn.dataset.tab === 'unsettled' ? '#00B3B8' : (btn.dataset.tab === 'settled' ? '#28a745' : '#666');
+                btn.style.background = isActive ? color : '#fff';
+                btn.style.color = isActive ? '#fff' : color;
+            });
+            reloadCommSettlementData();
+        }
+
+        async function reloadCommSettlementData(forceRefresh) {
             if (!commSettlementKey) return;
+            forceRefresh = !!forceRefresh;
+
+            // ✅ 批 2.2：5 分钟内不重复拉（用 localStorage 缓存）
+            const cacheKey = 'commCache_' + commSettlementKey + '_' + _currentCommTab;
+            const cacheTimestampEl = document.getElementById('commCacheTimestamp');
+            const cacheStatusEl = document.getElementById('commCacheStatus');
+            if (!forceRefresh) {
+                try {
+                    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+                    if (cached && (Date.now() - cached.timestamp) < 5 * 60 * 1000) {
+                        if (cacheStatusEl) cacheStatusEl.textContent = '✓ 缓存命中';
+                        if (cacheTimestampEl) cacheTimestampEl.textContent = '缓存于 ' + new Date(cached.timestamp).toLocaleTimeString();
+                        _processCommSettlementData(cached.data);
+                        return;
+                    }
+                } catch (e) {}
+            }
+
             document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:#999;">加载中...</p>';
+            if (cacheStatusEl) cacheStatusEl.textContent = '加载中…';
+
             try {
-                const includeSettled = (document.getElementById('commShowSettled') && document.getElementById('commShowSettled').checked) || false;
+                const includeSettled = (_currentCommTab === 'settled' || _currentCommTab === 'all');
                 const response = await fetch(GAS_URL + '?action=getUnsettledQuotesForUser&username=' + encodeURIComponent(commSettlementKey) + '&includeSettled=' + includeSettled);
                 const data = await response.json();
                 _processCommSettlementData(data);
+                // ✅ 写缓存
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify({
+                        data: data,
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    console.warn('Cache write failed (localStorage quota?):', e);
+                }
+                if (cacheStatusEl) cacheStatusEl.textContent = '✓ 已缓存';
+                if (cacheTimestampEl) cacheTimestampEl.textContent = '更新于 ' + new Date().toLocaleTimeString();
             } catch (e) {
                 console.error('Error reloading:', e);
+                if (cacheStatusEl) cacheStatusEl.textContent = '✗ 加载失败';
             }
         }
 
-        // ✅ 2026-08-08 优化：共用数据处理函数（处理 badge + 渲染表格 + 启用 100% 按钮）
+        // 标记结算后失效该用户的所有 cache（避免显示旧状态）
+        function invalidateCommCache(username) {
+            if (!username) return;
+            ['unsettled', 'settled', 'all'].forEach(function(tab) {
+                try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
+            });
+        }
+
+        // ✅ 2026-08-08 优化：共用数据处理函数（处理 tab badge + 渲染表格 + 启用 100% 按钮）
         function _processCommSettlementData(data) {
-            // ✅ 更新顶部 badge
-            const badgeUnsettled = document.getElementById('commBadgeUnsettled');
-            const badgeSettled = document.getElementById('commBadgeSettled');
-            const badgeTotal = document.getElementById('commBadgeTotal');
+            // ✅ 批 2.1：更新 3-tab 数字 badge
+            const tabUnsettledCount = document.getElementById('commTabUnsettledCount');
+            const tabSettledCount = document.getElementById('commTabSettledCount');
+            const tabAllCount = document.getElementById('commTabAllCount');
             if (data && data.totalUnsettled !== undefined) {
-                if (badgeUnsettled) badgeUnsettled.textContent = (currentLang==='zh'?'未结算 ':'Unsettled ') + data.totalUnsettled;
-                if (badgeSettled) badgeSettled.textContent = (currentLang==='zh'?'已结算 ':'Settled ') + data.totalSettled;
-                if (badgeTotal) badgeTotal.textContent = (currentLang==='zh'?'共 ':'Total ') + (data.totalUnsettled + data.totalSettled);
+                const total = (data.totalUnsettled || 0) + (data.totalSettled || 0);
+                if (tabUnsettledCount) tabUnsettledCount.textContent = data.totalUnsettled || 0;
+                if (tabSettledCount) tabSettledCount.textContent = data.totalSettled || 0;
+                if (tabAllCount) tabAllCount.textContent = total;
             }
             if (!data || !data.success || !data.quotes || data.quotes.length === 0) {
                 commSettlementAllData = [];
@@ -2157,10 +2219,18 @@
                 renderCommSettlementTable();
                 return;
             }
+            // ✅ 批 2.1：tab 过滤（settled tab 只显示已结算的，unsettled tab 只显示未结算的）
+            // GAS 端 includeSettled=true 时返回全部，前端再按 tab 过滤
+            let filteredQuotes = data.quotes;
+            if (_currentCommTab === 'settled') {
+                filteredQuotes = data.quotes.filter(function(q) { return q.settled50 && q.settled50[commSettlementKey]; });
+            } else if (_currentCommTab === 'unsettled') {
+                filteredQuotes = data.quotes.filter(function(q) { return !(q.settled50 && q.settled50[commSettlementKey]); });
+            }
 
             const projectCommMap = {}; // 按项目合并
             const displayName = currentCommUser;
-            data.quotes.forEach(quote => {
+            filteredQuotes.forEach(quote => {
                 // 计算总价
                 let grandTotal = quote.grandTotal || quote.total || 0;
                 if (quote.items && quote.items.length > 0) {
@@ -2316,22 +2386,11 @@
             document.getElementById('commDateFrom').value = '';
             document.getElementById('commDateTo').value = '';
             document.getElementById('commStatusFilter').value = 'all';
-            
-            try {
-                // ✅ 2026-08-08 优化：改用 getUnsettledQuotesForUser（轻量 action，批 1）
-                // 旧版用 getAllQuotes 拉所有 quote 慢，新版只拉该用户未结算的 quote
-                // 默认不返回已结算的（除非 includeSettled=true）
-                const includeSettled = (document.getElementById('commShowSettled') && document.getElementById('commShowSettled').checked) || false;
-                const response = await fetch(GAS_URL + '?action=getUnsettledQuotesForUser&username=' + encodeURIComponent(username) + '&includeSettled=' + includeSettled);
-                const data = await response.json();
-                if (data.success) {
-                    _processCommSettlementData(data);
-                    return;
-                }
-            } catch (error) {
-                console.error('Error loading commission settlement:', error);
-                document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:red;">加载失败</p>';
-            }
+            // ✅ 批 2.1：默认选中"未结算" tab（并触发 reloadCommSettlementData）
+            _currentCommTab = 'unsettled';
+            switchCommSettleTab('unsettled'); // 内部会调 reloadCommSettlementData()
+            return; // switchCommSettleTab 触发了 reload，这里直接 return 避免重复
+        }
         }
 
         // 渲染佣金结算表格
@@ -2552,6 +2611,8 @@
 
                 try {
                     const projNo = d.quote.projNo;
+                    // ✅ 批 2.2：标记成功失效缓存（避免显示旧 settled 状态）
+                    // 注意：这里 invalidate 会在下面 result.success 时再调一次，确保只成功后才失效
                     // ✅ 2026-08-07 改：用 quote.createdBy 优先于 commSettlementKey
                     // 原因：admin 在 FSD 账号下打开了 JSD01（被错位写入 FSD 目录），如果用 commSettlementKey='FSD'
                     //   写盘，会把 JSD01 写到 FSD 目录（污染扩散）。用 quote.createdBy='JSD' 写到正确目录
@@ -2582,6 +2643,8 @@
                     const result = await response.json();
                     
                     if (result.success) {
+                        // ✅ 批 2.2：标记成功失效缓存（避免下次还看到未结算）
+                        invalidateCommCache(commSettlementKey);
                         // 更新前端缓存的项目状态
                         if (type === 50) {
                             d.quote.settled50 = updatedQuote.settled50;
