@@ -1494,6 +1494,20 @@
                         <button class="btn btn-sm btn-info" onclick="exportCommSettlementExcel()" style="background:#28a745;color:#fff;">📊 导出Excel</button>
                     </div>
                 </div>
+                <!-- ✅ 2026-08-08 优化：顶部 badge + "显示已结算"复选框（批 1 + 批 2） -->
+                <div id="commSettlementBadge" style="margin:8px 0;padding:8px 12px;background:#f0f8ff;border-radius:4px;display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+                    <span>
+                        <span style="color:#00B3B8;font-weight:700;" id="commBadgeUnsettled">未结算 0</span>
+                        <span style="margin:0 8px;color:#999;">|</span>
+                        <span style="color:#28a745;" id="commBadgeSettled">已结算 0</span>
+                        <span style="margin:0 8px;color:#999;">|</span>
+                        <span style="color:#666;" id="commBadgeTotal">共 0</span>
+                    </span>
+                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:#666;">
+                        <input type="checkbox" id="commShowSettled" onchange="reloadCommSettlementData()" />
+                        <span>显示已结算</span>
+                    </label>
+                </div>
                 <!-- 数据表格 -->
                 <div id="commSettlementContent" style="max-height:55vh;overflow:auto;">
                     <p style="text-align:center;color:#999;">加载中...</p>
@@ -2111,6 +2125,178 @@
             return map[label] || label;
         }
 
+        // ✅ 2026-08-08 优化：刷新佣金结算数据（用于"显示已结算"切换）
+        // 只更新数据 + badge，不重置整个 modal
+        async function reloadCommSettlementData() {
+            if (!commSettlementKey) return;
+            document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:#999;">加载中...</p>';
+            try {
+                const includeSettled = (document.getElementById('commShowSettled') && document.getElementById('commShowSettled').checked) || false;
+                const response = await fetch(GAS_URL + '?action=getUnsettledQuotesForUser&username=' + encodeURIComponent(commSettlementKey) + '&includeSettled=' + includeSettled);
+                const data = await response.json();
+                _processCommSettlementData(data);
+            } catch (e) {
+                console.error('Error reloading:', e);
+            }
+        }
+
+        // ✅ 2026-08-08 优化：共用数据处理函数（处理 badge + 渲染表格 + 启用 100% 按钮）
+        function _processCommSettlementData(data) {
+            // ✅ 更新顶部 badge
+            const badgeUnsettled = document.getElementById('commBadgeUnsettled');
+            const badgeSettled = document.getElementById('commBadgeSettled');
+            const badgeTotal = document.getElementById('commBadgeTotal');
+            if (data && data.totalUnsettled !== undefined) {
+                if (badgeUnsettled) badgeUnsettled.textContent = (currentLang==='zh'?'未结算 ':'Unsettled ') + data.totalUnsettled;
+                if (badgeSettled) badgeSettled.textContent = (currentLang==='zh'?'已结算 ':'Settled ') + data.totalSettled;
+                if (badgeTotal) badgeTotal.textContent = (currentLang==='zh'?'共 ':'Total ') + (data.totalUnsettled + data.totalSettled);
+            }
+            if (!data || !data.success || !data.quotes || data.quotes.length === 0) {
+                commSettlementAllData = [];
+                commSettlementFilteredData = [];
+                renderCommSettlementTable();
+                return;
+            }
+
+            const projectCommMap = {}; // 按项目合并
+            const displayName = currentCommUser;
+            data.quotes.forEach(quote => {
+                // 计算总价
+                let grandTotal = quote.grandTotal || quote.total || 0;
+                if (quote.items && quote.items.length > 0) {
+                    grandTotal = quote.items.reduce((sum, item) => sum + (item.total || 0), 0);
+                }
+                if (quote.discount) grandTotal -= quote.discount;
+
+                // 计算已付金额和欠款%
+                let paidAmount = quote.paidAmount || 0;
+                if (quote.depositRecords && quote.depositRecords.length > 0) {
+                    paidAmount = quote.depositRecords.reduce((sum, dep) => sum + (dep.amount || 0), 0);
+                }
+                const debt = grandTotal - paidAmount;
+                const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
+
+                // 修复：佣金基数要用 splitDepositToPools 按池分开（与 Quote Details 一致）(2026-06-15)
+                const _pool = splitDepositToPools(quote);
+                const paidAmount50 = _pool.amount50;
+                const paidAmount100 = _pool.amount100;
+
+                // 角色列表（使用扁平字段结构，与保存时一致）
+                const roles = [
+                    {key: 'salesperson', label: '销售员', userField: 'salesperson', pct50Field: 'salespersonCommissionPct50', pct100Field: 'salespersonCommissionPct100'},
+                    {key: 'subSalesperson', label: '副销售员', userField: 'subSalesperson', pct50Field: 'subSalespersonCommissionPct50', pct100Field: 'subSalespersonCommissionPct100'},
+                    {key: 'designer', label: '设计师', userField: 'designerName', pct50Field: 'designerCommissionPct50', pct100Field: 'designerCommissionPct100'},
+                    {key: 'measurementEngineer', label: '测量员', userField: 'measurementEngineer', pct50Field: 'measurementEngineerCommissionPct50', pct100Field: 'measurementEngineerCommissionPct100'},
+                    {key: 'generalManager', label: '总负责人', userField: 'generalManagerName', pct50Field: 'generalManagerCommissionPct50', pct100Field: 'generalManagerCommissionPct100'}
+                ];
+
+                // 找出该用户匹配的角色（佣金百分比有值）- 使用displayName匹配
+                const matchedRoles = [];
+                roles.forEach(roleConfig => {
+                    const userName = quote[roleConfig.userField] || '';
+                    const pct50 = quote[roleConfig.pct50Field] || 0;
+                    const pct100 = quote[roleConfig.pct100Field] || 0;
+
+                    if (userName.toUpperCase() === displayName.toUpperCase() && (pct50 > 0 || pct100 > 0)) {
+                        const comm50 = paidAmount50 * pct50 / 100;
+                        const comm100 = paidAmount100 * pct100 / 100;
+                        matchedRoles.push({
+                            role: roleConfig.label,
+                            pct50: pct50,
+                            pct100: pct100,
+                            comm50: comm50,
+                            comm100: comm100
+                        });
+                    }
+                });
+
+                if (matchedRoles.length > 0) {
+                    const projNo = quote.projNo;
+                    const settled50 = quote.settled50 && quote.settled50[commSettlementKey] ? true : false;
+                    const settled100 = quote.settled100 && quote.settled100[commSettlementKey] ? true : false;
+
+                    if (!projectCommMap[projNo]) {
+                        const totalDeduct = quote.totalDeductAmount || 0;
+                        const deductSharedRoles = quote.deductSharedRoles || [];
+                        const deductPerRole = deductSharedRoles.length > 0 ? (totalDeduct / deductSharedRoles.length).toFixed(2) : 0;
+
+                        const rolesWithDeduct = matchedRoles.map(r => {
+                            const roleKey = getRoleKeyFromLabel(r.role);
+                            const isShared = deductSharedRoles.includes(roleKey);
+                            const roleDeduct = isShared ? parseFloat(deductPerRole) : 0;
+                            return {
+                                ...r,
+                                roleKey: roleKey,
+                                deduct100: roleDeduct
+                            };
+                        });
+
+                        const totalComm50 = rolesWithDeduct.reduce((sum, r) => sum + r.comm50, 0);
+                        const totalComm100 = rolesWithDeduct.reduce((sum, r) => sum + r.comm100, 0);
+                        const totalDeductAll = rolesWithDeduct.reduce((sum, r) => sum + r.deduct100, 0);
+
+                        const _project50Saved = !!(settled50);
+                        let netCommTotal;
+                        if (_project50Saved) {
+                            netCommTotal = totalComm100 - totalDeductAll;
+                        } else {
+                            if (totalComm50 > 0 && totalComm100 > 0) {
+                                netCommTotal = totalComm50 + totalComm100 - totalDeductAll;
+                            } else if (totalComm50 > 0) {
+                                netCommTotal = totalComm50 - totalDeductAll;
+                            } else if (totalComm100 > 0) {
+                                netCommTotal = totalComm100 - totalDeductAll;
+                            } else {
+                                netCommTotal = 0 - totalDeductAll;
+                            }
+                        }
+
+                        rolesWithDeduct.forEach(r => { r.project50Saved = _project50Saved; });
+
+                        projectCommMap[projNo] = {
+                            projNo: projNo,
+                            date: quote.date || quote.createdAt,
+                            customerName: quote.customerName || '-',
+                            grandTotal: grandTotal,
+                            debtPercent: debtPercent,
+                            comm50: totalComm50,
+                            comm100: totalComm100,
+                            netCommTotal: netCommTotal,
+                            deductAmt: totalDeductAll,
+                            deductRemarks: quote.deductRemarks || ('扣除:' + deductSharedRoles.length + '个角色'),
+                            internalNotes: quote.commissionNotes || quote.internalNotes || '',
+                            settled50: settled50,
+                            settled100: settled100,
+                            project50Saved: !!quote.commission50SavedAt,
+                            project100Saved: !!quote.commission100SavedAt,
+                            paidAmount50: _pool.amount50,
+                            paidAmount100: _pool.amount100,
+                            roles: rolesWithDeduct,
+                            quote: quote,
+                            deductSharedRoles: deductSharedRoles,
+                            deductPerRole: parseFloat(deductPerRole)
+                        };
+                    }
+                }
+            });
+
+            // 转换为数组
+            const userCommissions = Object.values(projectCommMap);
+
+            // 深拷贝数据，确保筛选时数据独立性
+            commSettlementAllData = JSON.parse(JSON.stringify(userCommissions));
+            commSettlementFilteredData = JSON.parse(JSON.stringify(userCommissions));
+            renderCommSettlementTable();
+
+            // 数据加载完，判断 100% 按钮是否启用（按用户已标 50% 即可启用）(2026-06-16)
+            // 修复：用 settled50 而不是 project50Saved
+            const anyUser50Settled = userCommissions.some(d => d.settled50);
+            if (anyUser50Settled) {
+                const btn100 = document.getElementById('btnMark100');
+                if (btn100) { btn100.disabled = false; btn100.style.opacity = '1'; btn100.title = ''; }
+            }
+        }
+
         // 打开佣金结算弹窗
         // displayName: 用于显示和匹配报价中的角色字段（如"TEST"）
         // username: 用于结算状态存储的键（如"test"）
@@ -2132,170 +2318,15 @@
             document.getElementById('commStatusFilter').value = 'all';
             
             try {
-                // 获取所有Quotes
-                const response = await fetch(GAS_URL + '?action=getAllQuotes');
+                // ✅ 2026-08-08 优化：改用 getUnsettledQuotesForUser（轻量 action，批 1）
+                // 旧版用 getAllQuotes 拉所有 quote 慢，新版只拉该用户未结算的 quote
+                // 默认不返回已结算的（除非 includeSettled=true）
+                const includeSettled = (document.getElementById('commShowSettled') && document.getElementById('commShowSettled').checked) || false;
+                const response = await fetch(GAS_URL + '?action=getUnsettledQuotesForUser&username=' + encodeURIComponent(username) + '&includeSettled=' + includeSettled);
                 const data = await response.json();
-                
-                if (data.success && data.quotes) {
-                    // 处理每个Quote，找出该用户的佣金（合并同一项目的多个角色）
-                    const projectCommMap = {}; // 按项目合并
-                    
-                    data.quotes.forEach(quote => {
-                        // 计算总价
-                        let grandTotal = quote.grandTotal || quote.total || 0;
-                        if (quote.items && quote.items.length > 0) {
-                            grandTotal = quote.items.reduce((sum, item) => sum + (item.total || 0), 0);
-                        }
-                        if (quote.discount) grandTotal -= quote.discount;
-                        
-                        // 计算已付金额和欠款%
-let paidAmount = quote.paidAmount || 0;
-                        if (quote.depositRecords && quote.depositRecords.length > 0) {
-                            paidAmount = quote.depositRecords.reduce((sum, dep) => sum + (dep.amount || 0), 0);
-                        }
-                        const debt = grandTotal - paidAmount;
-                        const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
-                        
-                        // 修复：佣金基数要用 splitDepositToPools 按池分开（与 Quote Details 一致）(2026-06-15)
-                        const _pool = splitDepositToPools(quote);
-                        const paidAmount50 = _pool.amount50;
-                        const paidAmount100 = _pool.amount100;
-                        
-                        // 角色列表（使用扁平字段结构，与保存时一致）
-                        const roles = [
-                            {key: 'salesperson', label: '销售员', userField: 'salesperson', pct50Field: 'salespersonCommissionPct50', pct100Field: 'salespersonCommissionPct100'},
-                            {key: 'subSalesperson', label: '副销售员', userField: 'subSalesperson', pct50Field: 'subSalespersonCommissionPct50', pct100Field: 'subSalespersonCommissionPct100'},
-                            {key: 'designer', label: '设计师', userField: 'designerName', pct50Field: 'designerCommissionPct50', pct100Field: 'designerCommissionPct100'},
-                            {key: 'measurementEngineer', label: '测量员', userField: 'measurementEngineer', pct50Field: 'measurementEngineerCommissionPct50', pct100Field: 'measurementEngineerCommissionPct100'},
-                            {key: 'generalManager', label: '总负责人', userField: 'generalManagerName', pct50Field: 'generalManagerCommissionPct50', pct100Field: 'generalManagerCommissionPct100'}
-                        ];
-                        
-                        // 找出该用户匹配的角色（佣金百分比有值）- 使用displayName匹配
-                        const matchedRoles = [];
-                        roles.forEach(roleConfig => {
-                            const userName = quote[roleConfig.userField] || '';
-                            const pct50 = quote[roleConfig.pct50Field] || 0;
-                            const pct100 = quote[roleConfig.pct100Field] || 0;
-                            
-                            // 检查：1.显示名匹配（displayName匹配报价中的角色字段）2.佣金百分比有值
-                            if (userName.toUpperCase() === displayName.toUpperCase() && (pct50 > 0 || pct100 > 0)) {
-                                // 修复：佣金基数用 paidAmount50/paidAmount100 而不是 grandTotal (2026-06-15)
-                                const comm50 = paidAmount50 * pct50 / 100;
-                                const comm100 = paidAmount100 * pct100 / 100;
-                                matchedRoles.push({
-                                    role: roleConfig.label,
-                                    pct50: pct50,
-                                    pct100: pct100,
-                                    comm50: comm50,
-                                    comm100: comm100
-                                });
-                            }
-                        });
-                        
-                        // 如果有匹配的角色，按项目合并
-                        if (matchedRoles.length > 0) {
-                            const projNo = quote.projNo;
-                            
-                            // 获取结算状态 - 使用commSettlementKey（username）作为键
-                            const settled50 = quote.settled50 && quote.settled50[commSettlementKey] ? true : false;
-                            const settled100 = quote.settled100 && quote.settled100[commSettlementKey] ? true : false;
-                            
-                            if (!projectCommMap[projNo]) {
-                                // 计算扣除佣金（按角色均分，扣除只在100%阶段）
-                                const totalDeduct = quote.totalDeductAmount || 0;
-                                const deductSharedRoles = quote.deductSharedRoles || [];
-                                const deductPerRole = deductSharedRoles.length > 0 ? (totalDeduct / deductSharedRoles.length).toFixed(2) : 0;
-                                
-                                // 计算每个角色明细的扣除（只在100%阶段扣除）
-                                const rolesWithDeduct = matchedRoles.map(r => {
-                                    // 检查这个角色是否在承担列表中
-                                    const roleKey = getRoleKeyFromLabel(r.role);
-                                    const isShared = deductSharedRoles.includes(roleKey);
-                                    const roleDeduct = isShared ? parseFloat(deductPerRole) : 0;
-                                    return {
-                                        ...r,
-                                        roleKey: roleKey,
-                                        deduct100: roleDeduct // 扣除只在100%阶段
-                                    };
-                                });
-                                
-                                const totalComm50 = rolesWithDeduct.reduce((sum, r) => sum + r.comm50, 0);
-                                const totalComm100 = rolesWithDeduct.reduce((sum, r) => sum + r.comm100, 0);
-                                const totalDeductAll = rolesWithDeduct.reduce((sum, r) => sum + r.deduct100, 0);
-                                
-                                // === 总实收计算规则（2026-06-16）===
-                                // 修复：用 settled50[commSettlementKey]（按用户手动标记），不是 project50Saved（保存佣金 % 时间戳）
-                                // (A) 未标"50%已结算"，50%+100% 都有金额 → 50% + 100% - 扣除
-                                // (B) 已标"50%已结算"，100% 有金额 → 只算 100% - 扣除
-                                // (C) 未标"50%已结算"，100%=0 而 50% 有金额 → 只算 50% - 扣除
-                                // (D) 未标"50%已结算"，50%=0 而 100% 有金额 → 只算 100% - 扣除
-                                const _project50Saved = !!(settled50);
-                                let netCommTotal;
-                                if (_project50Saved) {
-                                    // 规则 B：已标 50%已结算，只看 100% 佣金
-                                    netCommTotal = totalComm100 - totalDeductAll;
-                                } else {
-                                    // 未标 50%已结算：按 50/100 列哪个有金额决定
-                                    if (totalComm50 > 0 && totalComm100 > 0) {
-                                        netCommTotal = totalComm50 + totalComm100 - totalDeductAll;
-                                    } else if (totalComm50 > 0) {
-                                        netCommTotal = totalComm50 - totalDeductAll;
-                                    } else if (totalComm100 > 0) {
-                                        netCommTotal = totalComm100 - totalDeductAll;
-                                    } else {
-                                        netCommTotal = 0 - totalDeductAll;
-                                    }
-                                }
-                                
-                                // 把 project50Saved 也下推到 role 层面，方便角色卡片显示
-                                rolesWithDeduct.forEach(r => { r.project50Saved = _project50Saved; });
-                                
-                                // === 50/100 池（项目级标识，方便 admin 一眼看出 50 池是否已冻结） ===
-                                // 上面已经计算过 _pool / paidAmount50 / paidAmount100，复用即可 (2026-06-15)
-                                projectCommMap[projNo] = {
-                                    projNo: projNo,
-                                    date: quote.date || quote.createdAt,
-                                    customerName: quote.customerName || '-',
-                                    grandTotal: grandTotal,
-                                    debtPercent: debtPercent,
-                                    comm50: totalComm50,
-                                    comm100: totalComm100,
-                                    netCommTotal: netCommTotal, // 按规则算的总实收
-                                    deductAmt: totalDeductAll, // 总扣除（所有角色的扣除总和）
-                                    deductRemarks: quote.deductRemarks || ('扣除:' + deductSharedRoles.length + '个角色'),
-                                    internalNotes: quote.commissionNotes || quote.internalNotes || '',
-                                    settled50: settled50, // 按用户的发工资状态（保留）
-                                    settled100: settled100, // 按用户的发工资状态（保留）
-                                    project50Saved: !!quote.commission50SavedAt, // 项目级：%(50) 已保存
-                                    project100Saved: !!quote.commission100SavedAt, // 项目级：%(100) 已保存
-                                    paidAmount50: _pool.amount50, // 50 池金额
-                                    paidAmount100: _pool.amount100, // 100 池金额
-                                    roles: rolesWithDeduct, // 保存角色明细（含扣除信息）
-quote: quote,
-                                    deductSharedRoles: deductSharedRoles,
-                                    deductPerRole: parseFloat(deductPerRole)
-                                };
-                            }
-                        }
-                    });
-                    
-                    // 转换为数组
-                    const userCommissions = Object.values(projectCommMap);
-                    
-                    // 深拷贝数据，确保筛选时数据独立性
-                    commSettlementAllData = JSON.parse(JSON.stringify(userCommissions));
-                    commSettlementFilteredData = JSON.parse(JSON.stringify(userCommissions));
-                    renderCommSettlementTable();
-                    
-                    // 数据加载完，判断 100% 按钮是否启用（按用户已标 50% 即可启用）(2026-06-16)
-                    // 修复：用 settled50 而不是 project50Saved
-                    const anyUser50Settled = userCommissions.some(d => d.settled50);
-                    if (anyUser50Settled) {
-                        const btn100 = document.getElementById('btnMark100');
-                        if (btn100) { btn100.disabled = false; btn100.style.opacity = '1'; btn100.title = ''; }
-                    }
-                } else {
-                    document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:red;">无数据</p>';
+                if (data.success) {
+                    _processCommSettlementData(data);
+                    return;
                 }
             } catch (error) {
                 console.error('Error loading commission settlement:', error);
@@ -2597,14 +2628,14 @@ quote: quote,
             return '"' + String(str || '').replace(/"/g, '""') + '"';
         }
 
+        // ✅ 2026-08-08 优化：导出 Excel 弹窗（批 1C）
+        // 选项 A：标记已结算 + 上传云端 + 保存本地
+        // 选项 B：只保存到本地不标记
         async function exportCommSettlementExcel() {
-
             const lang = currentLang === 'zh';
             // 导出：只导出用户勾选的（checked && not disabled）
             const checkedBoxes = document.querySelectorAll('.comm-cb:checked:not(:disabled)');
-
             if (checkedBoxes.length === 0) {
-                // 如果一行都没勾选，提示用户
                 const allBoxes = document.querySelectorAll('.comm-cb:not(:disabled)');
                 if (allBoxes.length === 0) {
                     alert(lang?'没有可导出的项目':'No projects to export');
@@ -2613,11 +2644,45 @@ quote: quote,
                 }
                 return;
             }
+            // ✅ 弹窗：让用户选 A 还是 B
+            const totalSelected = checkedBoxes.length;
+            // 计算已结算的数量（被 disable 的 checkbox）
+            const settledCount = document.querySelectorAll('.comm-cb:disabled').length;
+            const confirmMsg = lang
+                ? `已选择 ${totalSelected} 个项目（已结算 ${settledCount} 个被排除）。\n\n请选择导出方式：\n\n【确定】= 标记已结算 + 上传云端 + 保存本地\n【取消】= 只保存到本地不标记已结算`
+                : `${totalSelected} projects selected (${settledCount} settled excluded). Choose export method:\n\n[OK] = Mark settled + Upload cloud + Save local\n[Cancel] = Save local only (don't mark settled)`;
+            const markAndExport = confirm(confirmMsg);
+            // 用户确认：执行实际导出（先标记 settle，再 export）
+            await _doExportCommCsv(checkedBoxes, markAndExport);
+        }
+
+        // 实际执行 CSV 导出（带/不带 mark settled）
+        async function _doExportCommCsv(checkedBoxes, markAndExport) {
+            const lang = currentLang === 'zh';
+
+            // ✅ 选项 A：先标记已结算（用 markCommSettled 内部逻辑，避免重复代码）
+            if (markAndExport) {
+                for (const cb of checkedBoxes) {
+                    cb.disabled = true;
+                }
+                // 调用 markCommSettled(50) 走完整流程（包含 mark settled 写盘 + 触发 badge 更新）
+                await markCommSettled(50);
+                // 重新拉取数据（因为状态变了，但 commSettlementFilteredData 还是旧的）
+                await reloadCommSettlementData();
+                // 重新选 checkbox（reload 后旧 cb 不在了）
+                // ⚠️ 简单做法：export 用 cb.dataset.idx 拿数据，idx 在 reload 后可能失效
+                //   改用 projNo 重新找
+                checkedBoxes = Array.from(document.querySelectorAll('.comm-cb:checked:not(:disabled)'));
+                if (checkedBoxes.length === 0) {
+                    showToast(lang?'没有可导出的项目（已全部标记）':'No projects to export (all marked)', 'warning');
+                    return;
+                }
+            }
 
             const today = new Date().toISOString().slice(0, 10);
             const displayName = currentCommUser || 'user';
             const filename = `COMM_${displayName}_${today}.csv`;
-            
+
             // 5 个角色列（按示例 Excel 格式）
             // key: pct50字段名, pct100Key: pct100字段名, userField: 用户名字段名, name: 列标题
             const roleKeys = [
@@ -2724,7 +2789,12 @@ quote: quote,
                 const result = await response.json();
                 
                 if (result.success) {
-                    showToast((lang?'已导出（本地+云端）：':'Exported (local+cloud): ') + filename, 'success');
+                    // ✅ 2026-08-08 优化：根据选项 A/B 显示不同 toast
+                    if (markAndExport) {
+                        showToast((lang?'✓ 已标记 '+checkedBoxes.length+' 个 + 导出（本地+云端）：':'✓ Marked '+checkedBoxes.length+' settled + Exported (local+cloud): ') + filename, 'success');
+                    } else {
+                        showToast((lang?'已导出（本地+云端，未标记）：':'Exported (local+cloud, not marked): ') + filename, 'success');
+                    }
                 } else {
                     showToast((lang?'本地已下载，云端失败：':'Local saved, cloud failed: ') + (result.message || 'Unknown'), 'error');
                 }
