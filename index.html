@@ -1267,6 +1267,21 @@
         </div>
     </div>
 
+    <!-- ✅ 2026-08-08 批 3：佣金结算历史弹窗（commSettleHistory 完整审计） -->
+    <div class="modal-overlay" id="commHistoryModal">
+        <div class="modal" style="width:680px;max-width:95vw;">
+            <div class="modal-header">
+                <h3>佣金结算历史 - <span id="commHistoryProjNo"></span></h3>
+                <button class="modal-close" onclick="closeCommHistoryModal()">×</button>
+            </div>
+            <div class="modal-body" id="commHistoryContent" style="max-height:70vh;overflow-y:auto;padding:20px;">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCommHistoryModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 撤回锁定弹窗（2026-07-24，2026-07-27 扩展为 5 种类型，2026-08-07 加 reopen 第 6 种） -->
     <div class="modal-overlay" id="withdrawModal">
         <div class="modal" style="width:480px;max-width:95vw;">
@@ -2413,6 +2428,10 @@
             html += '<th style="padding:10px;border:1px solid #ddd;text-align:right;">' + (lang?'100%':'100%') + '</th>';
             html += '<th style="padding:10px;border:1px solid #ddd;text-align:right;">' + (lang?'扣除':'Deduct') + '</th>';
             html += '<th style="padding:10px;border:1px solid #ddd;text-align:center;">' + (lang?'状态':'Status') + '</th>';
+            // ✅ 2026-08-08 批 3：已结算 tab 加"标记时间"列
+            if (_currentCommTab === 'settled' || _currentCommTab === 'all') {
+                html += '<th style="padding:10px;border:1px solid #ddd;text-align:left;width:140px;">' + (lang?'标记时间':'Marked At') + '</th>';
+            }
             html += '</tr></thead><tbody>';
             
             data.forEach((d, idx) => {
@@ -2449,11 +2468,48 @@
                 } else {
                     html += '<span style="background:#6c757d;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">-</span>';
                 }
-                html += '</td></tr>';
-                
+                html += '</td>';
+                // ✅ 2026-08-08 批 3：已结算/全部 tab 加"标记时间"列 + "查看历史"按钮
+                if (_currentCommTab === 'settled' || _currentCommTab === 'all') {
+                    html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;line-height:1.4;min-width:140px;">';
+                    // 找本用户（commSettlementKey）的最后 mark50/mark100/unmark 时间
+                    let lastMarkTime = '';
+                    let lastMarkBy = '';
+                    let lastMarkAction = '';
+                    if (d.quote && d.quote.commSettleHistory && d.quote.commSettleHistory.length > 0) {
+                        const userMarks = d.quote.commSettleHistory.filter(function(h) {
+                            return h.action === 'mark50' || h.action === 'mark100' || h.action === 'unmark50' || h.action === 'unmark100';
+                        });
+                        if (userMarks.length > 0) {
+                            const last = userMarks[userMarks.length - 1];
+                            lastMarkTime = formatDateTime(last.at);
+                            lastMarkBy = last.by || '?';
+                            lastMarkAction = last.action;
+                        }
+                    }
+                    if (lastMarkTime) {
+                        const isUnmark = lastMarkAction.indexOf('unmark') === 0;
+                        const bg = isUnmark ? '#dc3545' : '#28a745';
+                        let label = '';
+                        if (lastMarkAction === 'mark50') label = (lang?'50% 已发':'50% Settled');
+                        else if (lastMarkAction === 'mark100') label = (lang?'100% 已发':'100% Settled');
+                        else if (lastMarkAction === 'unmark50') label = (lang?'取消 50%':'Unmark 50%');
+                        else label = (lang?'取消 100%':'Unmark 100%');
+                        html += '<div style="color:' + bg + ';font-weight:600;font-size:11px;">' + label + '</div>';
+                        html += '<div style="color:#666;font-size:11px;">' + lastMarkTime + '</div>';
+                        html += '<div style="color:#999;font-size:10px;">by ' + escapeHtml(lastMarkBy) + '</div>';
+                    } else {
+                        html += '<span style="color:#999;font-size:11px;">-</span>';
+                    }
+                    // 查看历史按钮
+                    html += '<button onclick="showCommHistory(' + idx + ')" style="margin-top:4px;padding:3px 8px;background:#fff;border:1px solid #00B3B8;color:#00B3B8;border-radius:3px;cursor:pointer;font-size:11px;width:100%;">' + (lang?'查看历史':'History') + '</button>';
+                    html += '</td>';
+                }
+                html += '</tr>';
+
                 // 详情行（隐藏）- 显示各角色佣金明细
                 html += '<tr id="commDetail_' + idx + '" style="display:none;background:#f9f9f9;">';
-                html += '<td colspan="8" style="padding:15px;border:1px solid #ddd;">';
+                html += '<td colspan="9" style="padding:15px;border:1px solid #ddd;">';
                 html += '<div style="margin-bottom:10px;"><strong>' + (lang?'各角色佣金明细（扣除只在100%阶段）':'Commission Details (Deduct at 100% only)') + ':</strong></div>';
                 html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">';
                 
@@ -2510,6 +2566,65 @@
             if (row) {
                 row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
             }
+        }
+
+        // ✅ 2026-08-08 批 3：佣金结算历史弹窗（commSettleHistory 完整审计）
+        // 操作类型翻译表
+        const _COMM_HISTORY_ACTION_LABELS = {
+            mark50: { zh: '标记 50% 已发工资', en: 'Mark 50% Settled', color: '#28a745', icon: '✓' },
+            mark100: { zh: '标记 100% 已发工资', en: 'Mark 100% Settled', color: '#28a745', icon: '✓' },
+            unmark50: { zh: '取消 50% 已发工资', en: 'Unmark 50%', color: '#dc3545', icon: '✗' },
+            unmark100: { zh: '取消 100% 已发工资', en: 'Unmark 100%', color: '#dc3545', icon: '✗' },
+            withdraw_commission50: { zh: '撤回 50% 佣金锁定', en: 'Withdraw 50% Commission', color: '#00B3B8', icon: '↶' },
+            withdraw_commission100: { zh: '撤回 100% 佣金锁定', en: 'Withdraw 100% Commission', color: '#00B3B8', icon: '↶' },
+            withdraw_deposit50: { zh: '撤回 50% 定金锁定', en: 'Withdraw 50% Deposit', color: '#6f42c1', icon: '↶' },
+            withdraw_deposit100: { zh: '撤回 100% 定金锁定', en: 'Withdraw 100% Deposit', color: '#6f42c1', icon: '↶' },
+            withdraw_clearState: { zh: '清空下单/完成状态', en: 'Clear Order/Complete State', color: '#fd7e14', icon: '↶' },
+            withdraw_reopen: { zh: '重新打开（清除完成）', en: 'Reopen (Clear Complete)', color: '#20c997', icon: '↶' }
+        };
+
+        function showCommHistory(idx) {
+            const lang = currentLang === 'zh';
+            const d = commSettlementFilteredData[idx];
+            if (!d) return;
+            document.getElementById('commHistoryProjNo').textContent = d.projNo || '';
+            const content = document.getElementById('commHistoryContent');
+            const history = (d.quote && d.quote.commSettleHistory) ? d.quote.commSettleHistory : [];
+            if (history.length === 0) {
+                content.innerHTML = '<p style="text-align:center;color:#999;padding:30px;">' + (lang?'暂无历史记录':'No history yet') + '</p>';
+            } else {
+                // 倒序（最新的在最上面）
+                const sorted = history.slice().sort(function(a, b) { return new Date(b.at) - new Date(a.at); });
+                let html = '<div style="font-size:12px;color:#666;margin-bottom:12px;">' +
+                    (lang?`共 ${history.length} 条记录（最多保留 50 条）`:`${history.length} records (max 50 retained)`) +
+                    '</div>';
+                html += '<div style="display:flex;flex-direction:column;gap:10px;">';
+                sorted.forEach(function(h) {
+                    const meta = _COMM_HISTORY_ACTION_LABELS[h.action] || { zh: h.action, en: h.action, color: '#666', icon: '·' };
+                    const label = lang ? meta.zh : meta.en;
+                    html += '<div style="border-left:3px solid ' + meta.color + ';padding:8px 12px;background:#f9f9f9;border-radius:0 4px 4px 0;">';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                    html += '<div style="font-weight:600;color:' + meta.color + ';">' + meta.icon + ' ' + label + '</div>';
+                    html += '<div style="font-size:11px;color:#999;">' + formatDateTime(h.at) + '</div>';
+                    html += '</div>';
+                    html += '<div style="font-size:12px;color:#666;margin-top:3px;">操作人: <strong>' + escapeHtml(h.by || '?') + '</strong>';
+                    if (h.prev !== undefined && h.next !== undefined) {
+                        html += ' · ' + (lang?'状态变化':'State') + ': ' + (h.prev ? '✓' : '✗') + ' → ' + (h.next ? '✓' : '✗');
+                    }
+                    if (h.note) {
+                        html += ' · ' + escapeHtml(h.note);
+                    }
+                    html += '</div>';
+                    html += '</div>';
+                });
+                html += '</div>';
+                content.innerHTML = html;
+            }
+            document.getElementById('commHistoryModal').classList.add('active');
+        }
+
+        function closeCommHistoryModal() {
+            document.getElementById('commHistoryModal').classList.remove('active');
         }
 
         // 筛选佣金结算数据
