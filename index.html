@@ -875,12 +875,16 @@
                 <!-- ✅ 2026-08-15：报价系统（最左） -->
                 <div class="nav-card" onclick="openNavLink('https://ongsami-create.github.io/squirreldesigner/')">
                     <div class="nav-card-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <!-- 文档外框 + 折角 -->
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                             <polyline points="14 2 14 8 20 8"></polyline>
-                            <line x1="16" y1="13" x2="8" y2="13"></line>
-                            <line x1="16" y1="17" x2="8" y2="17"></line>
-                            <line x1="10" y1="9" x2="8" y2="9"></line>
+                            <!-- 文档行（被价格标签遮挡前） -->
+                            <line x1="9" y1="13" x2="14" y2="13"></line>
+                            <line x1="9" y1="16" x2="12" y2="16"></line>
+                            <!-- 价格标签（圆角矩形 + 三角 + 圆孔，叠加在文档右下） -->
+                            <path d="M13 12 H18 L21 15 L18 18 H13 a1 1 0 0 1 -1 -1 V13 a1 1 0 0 1 1 -1 z" fill="currentColor" stroke="currentColor" stroke-width="0.5"></path>
+                            <circle cx="14.5" cy="15" r="0.9" fill="white" stroke="none"></circle>
                         </svg>
                     </div>
                     <div class="nav-card-title">报价系统</div>
