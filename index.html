@@ -872,7 +872,7 @@
         <div class="main-container">
             <!-- Navigation Cards -->
             <div class="nav-cards">
-                <div class="nav-card" onclick="showDeveloping()">
+                <div class="nav-card" onclick="openNavLink('https://ongsami-create.github.io/quote-analysis/')">
                     <div class="nav-card-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 3v18h18"></path>
@@ -880,7 +880,7 @@
                         </svg>
                     </div>
                     <div class="nav-card-title" data-i18n="quoteAnalysis">报价分析</div>
-                    <div class="nav-card-badge" data-i18n="inDev">开发中</div>
+                    <div class="nav-card-badge" style="color:#28a745;">🔗 点击进入</div>
                 </div>
                 <div class="nav-card" onclick="showDeveloping()">
                     <div class="nav-card-icon">
@@ -904,14 +904,14 @@
                     <div class="nav-card-title" data-i18n="profitAnalysis">利润分析</div>
                     <div class="nav-card-badge" data-i18n="inDev">开发中</div>
                 </div>
-                <div class="nav-card" onclick="showDeveloping()">
+                <div class="nav-card" onclick="openNavLink('https://squirreldesignersssproduct.space.minimaxi.com/')">
                     <div class="nav-card-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
                         </svg>
                     </div>
                     <div class="nav-card-title" data-i18n="productManagement">产品管理</div>
-                    <div class="nav-card-badge" data-i18n="inDev">开发中</div>
+                    <div class="nav-card-badge" style="color:#28a745;">🔗 点击进入</div>
                 </div>
                 <div class="nav-card" onclick="showDeveloping()">
                     <div class="nav-card-icon">
@@ -924,6 +924,17 @@
                     </div>
                     <div class="nav-card-title" data-i18n="orderManagement">订单管理</div>
                     <div class="nav-card-badge" data-i18n="inDev">开发中</div>
+                </div>
+                <!-- ✅ 2026-08-15 新增：安装追踪 -->
+                <div class="nav-card" onclick="openNavLink('https://ongsami-create.github.io/squirrelinstall/')">
+                    <div class="nav-card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 11l3 3L22 4"></path>
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                        </svg>
+                    </div>
+                    <div class="nav-card-title">安装追踪</div>
+                    <div class="nav-card-badge" style="color:#28a745;">🔗 点击进入</div>
                 </div>
             </div>
 
@@ -4551,6 +4562,12 @@ deductCommissionPct: deductCommissionPct,
         // Show developing message
         function showDeveloping() {
             showToast(translations[currentLang].developing, 'success');
+        }
+
+        // ✅ 2026-08-15：后台导航卡片 - 打开外部链接（新窗口）
+        function openNavLink(url) {
+            if (!url) return;
+            window.open(url, '_blank', 'noopener,noreferrer');
         }
 
         // Toast notification
