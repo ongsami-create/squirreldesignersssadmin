@@ -35,28 +35,52 @@
             min-height: 100vh;
         }
 
-        /* Login Page */
+        /* Login Page - macOS 风格 (2026-08-16) */
         .login-page {
             position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: linear-gradient(135deg, var(--secondary-dark) 0%, var(--secondary) 100%);
+            background: linear-gradient(135deg, #a8c0ff 0%, #3f2b96 50%, #ff6b9d 100%);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 9999;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
         }
 
         .login-container {
-            background: white;
-            padding: 40px;
-            border-radius: 16px;
-            width: 380px;
+            position: relative;
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(30px) saturate(180%);
+            -webkit-backdrop-filter: blur(30px) saturate(180%);
+            padding: 50px 40px 40px;
+            border-radius: 20px;
+            width: 400px;
+            max-width: 90vw;
             text-align: center;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.3) inset;
+            border: 1px solid rgba(255,255,255,0.4);
         }
+
+        /* ✅ 2026-08-16 macOS 交通灯按钮 */
+        .login-traffic-lights {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            display: flex;
+            gap: 8px;
+        }
+        .login-traffic-lights span {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .login-traffic-lights .tl-red { background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.1); }
+        .login-traffic-lights .tl-yellow { background: #febc2e; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.1); }
+        .login-traffic-lights .tl-green { background: #28c840; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.1); }
 
         .login-logo {
             margin-bottom: 20px;
@@ -68,59 +92,70 @@
         }
 
         .login-container h2 {
-            color: var(--secondary-dark);
+            color: #1d1d1f;
+            font-weight: 700;
             margin-bottom: 5px;
             font-size: 24px;
         }
 
         .login-subtitle {
-            color: var(--text-muted);
+            color: #86868b;
             margin-bottom: 30px;
-            font-size: 14px;
+            font-size: 13px;
+            font-weight: 400;
         }
 
         .login-form {
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 14px;
         }
 
         .login-input {
             width: 100%;
             padding: 12px 15px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.7);
             font-family: inherit;
             font-size: 14px;
-            transition: all 0.3s;
+            color: #1d1d1f;
+            transition: all 0.2s;
+            box-sizing: border-box;
         }
 
+        .login-input::placeholder { color: #86868b; }
         .login-input:focus {
             outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(0,179,184,0.15);
+            border-color: #007AFF;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(0,122,255,0.15);
         }
 
         .login-btn {
             width: 100%;
-            padding: 14px;
-            background: var(--primary);
+            padding: 12px;
+            background: #007AFF;
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             font-family: inherit;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.2s;
+            box-shadow: 0 2px 6px rgba(0,122,255,0.25);
         }
 
         .login-btn:hover {
-            background: var(--primary-dark);
+            background: #0066d6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(0,122,255,0.3);
         }
+        .login-btn:active { transform: translateY(0); }
 
         .login-error {
-            color: var(--danger);
+            color: #ff3b30;
             font-size: 13px;
             margin-top: 10px;
             display: none;
@@ -819,6 +854,12 @@
     <!-- Login Page -->
     <div class="login-page hidden" id="loginPage">
         <div class="login-container">
+            <!-- ✅ 2026-08-16 macOS 交通灯 -->
+            <div class="login-traffic-lights">
+                <span class="tl-red"></span>
+                <span class="tl-yellow"></span>
+                <span class="tl-green"></span>
+            </div>
             <div class="login-logo">
                 <img src="assets/squirrel_care_logo.png" alt="Squirrel Care" style="max-width:280px;width:100%;height:auto;display:block;margin:0 auto;">
             </div>
