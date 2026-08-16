@@ -145,6 +145,10 @@
         .header-left { display: flex; align-items: center; gap: 15px; }
         .logo { height: 50px; background: transparent; border-radius: 8px; padding: 3px 10px; display: flex; align-items: center; gap: 10px; }
         .logo svg { max-height: 100%; width: auto; }
+        /* ✅ 2026-08-16：Squirrel Care LOGO 适配 */
+        .logo-img { height: 44px; width: auto; max-width: 240px; background: #fff; border-radius: 4px; padding: 2px 6px; }
+        .login-logo { margin-bottom: 20px; padding: 0 10px; }
+        .login-logo img { display: block; margin: 0 auto; }
         .logo-text { color: white; font-size: 18px; font-weight: 800; white-space: nowrap; letter-spacing: 1px; }
         .header-right { display: flex; gap: 10px; align-items: center; }
 
@@ -816,20 +820,9 @@
     <div class="login-page hidden" id="loginPage">
         <div class="login-container">
             <div class="login-logo">
-                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="50" cy="50" r="45" fill="#4A4A3D"></circle>
-                    <ellipse cx="35" cy="45" rx="8" ry="10" fill="#00B3B8"></ellipse>
-                    <ellipse cx="65" cy="45" rx="8" ry="10" fill="#00B3B8"></ellipse>
-                    <ellipse cx="35" cy="45" rx="3" ry="4" fill="#1A1A1A"></ellipse>
-                    <ellipse cx="65" cy="45" rx="3" ry="4" fill="#1A1A1A"></ellipse>
-                    <path d="M 35 70 Q 50 80 65 70" stroke="#00B3B8" stroke-width="4" fill="none" stroke-linecap="round"></path>
-                    <ellipse cx="20" cy="50" rx="12" ry="8" fill="#6B6B5D"></ellipse>
-                    <ellipse cx="80" cy="50" rx="12" ry="8" fill="#6B6B5D"></ellipse>
-                    <path d="M 10 55 Q 5 60 15 65" stroke="#6B6B5D" stroke-width="3" fill="none"></path>
-                    <path d="M 90 55 Q 95 60 85 65" stroke="#6B6B5D" stroke-width="3" fill="none"></path>
-                </svg>
+                <img src="assets/squirrel_care_logo.png" alt="Squirrel Care" style="max-width:280px;width:100%;height:auto;display:block;margin:0 auto;">
             </div>
-            <h2>Squirrel Designer</h2>
+            <h2>Squirrel Care</h2>
             <p class="login-subtitle">Admin Panel</p>
             <form class="login-form" id="loginForm">
                 <input type="text" class="login-input" id="loginUsername" placeholder="账号" required="">
@@ -846,15 +839,8 @@
         <header class="header">
             <div class="header-left">
                 <div class="logo">
-                    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" width="50" height="50">
-                        <circle cx="50" cy="50" r="45" fill="#00B3B8"></circle>
-                        <ellipse cx="35" cy="45" rx="8" ry="10" fill="#4A4A3D"></ellipse>
-                        <ellipse cx="65" cy="45" rx="8" ry="10" fill="#4A4A3D"></ellipse>
-                        <ellipse cx="35" cy="45" rx="3" ry="4" fill="#FFFFFF"></ellipse>
-                        <ellipse cx="65" cy="45" rx="3" ry="4" fill="#FFFFFF"></ellipse>
-                        <path d="M 35 70 Q 50 80 65 70" stroke="#4A4A3D" stroke-width="4" fill="none" stroke-linecap="round"></path>
-                    </svg>
-                    <span class="logo-text" data-i18n="title">Squirrel Designer - 管理后台</span>
+                    <img src="assets/squirrel_care_logo.png" alt="Squirrel Care" class="logo-img">
+                    <span class="logo-text" data-i18n="title">Squirrel Care - 管理后台</span>
                 </div>
             </div>
             <div class="header-right">
@@ -1179,14 +1165,7 @@
         <header class="header">
             <div class="header-left">
                 <div class="logo">
-                    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" width="50" height="50">
-                        <circle cx="50" cy="50" r="45" fill="#00B3B8"></circle>
-                        <ellipse cx="35" cy="45" rx="8" ry="10" fill="#4A4A3D"></ellipse>
-                        <ellipse cx="65" cy="45" rx="8" ry="10" fill="#4A4A3D"></ellipse>
-                        <ellipse cx="35" cy="45" rx="3" ry="4" fill="#FFFFFF"></ellipse>
-                        <ellipse cx="65" cy="45" rx="3" ry="4" fill="#FFFFFF"></ellipse>
-                        <path d="M 35 70 Q 50 80 65 70" stroke="#4A4A3D" stroke-width="4" fill="none" stroke-linecap="round"></path>
-                    </svg>
+                    <img src="assets/squirrel_care_logo.png" alt="Squirrel Care" class="logo-img">
                     <span class="logo-text" data-i18n="userDetails">用户详情</span>
                 </div>
             </div>
