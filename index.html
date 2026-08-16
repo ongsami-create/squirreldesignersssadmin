@@ -29,9 +29,9 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'DM Mono', 'Noto Sans SC', monospace;
-            background: var(--bg-light);
-            color: var(--text-dark);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+            background: #f5f5f7;
+            color: #1d1d1f;
             min-height: 100vh;
         }
 
@@ -161,11 +161,13 @@
             display: none;
         }
 
-        /* Header */
+        /* ✅ 2026-08-16 macOS 风格 Header (毛玻璃 + 浅色) */
         .header {
-            background: var(--secondary-dark);
-            color: white;
-            padding: 15px 30px;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            color: #1d1d1f;
+            padding: 12px 30px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -174,17 +176,18 @@
             left: 0;
             right: 0;
             z-index: 1000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            box-shadow: 0 1px 0 rgba(0,0,0,0.08);
+            border-bottom: 1px solid rgba(0,0,0,0.05);
         }
 
         .header-left { display: flex; align-items: center; gap: 15px; }
         .logo { height: 50px; background: transparent; border-radius: 8px; padding: 3px 10px; display: flex; align-items: center; gap: 10px; }
         .logo svg { max-height: 100%; width: auto; }
-        /* ✅ 2026-08-16：Squirrel Care LOGO 适配 */
-        .logo-img { height: 44px; width: auto; max-width: 240px; background: #fff; border-radius: 4px; padding: 2px 6px; }
+        /* ✅ 2026-08-16：Squirrel Care LOGO 适配（去白底，跟毛玻璃 header 协调） */
+        .logo-img { height: 44px; width: auto; max-width: 240px; background: transparent; border-radius: 4px; padding: 2px 0; }
         .login-logo { margin-bottom: 20px; padding: 0 10px; }
         .login-logo img { display: block; margin: 0 auto; }
-        .logo-text { color: white; font-size: 18px; font-weight: 800; white-space: nowrap; letter-spacing: 1px; }
+        .logo-text { color: #1d1d1f; font-size: 18px; font-weight: 700; white-space: nowrap; letter-spacing: 0.3px; }
         .header-right { display: flex; gap: 10px; align-items: center; }
 
         .btn {
@@ -200,11 +203,12 @@
             gap: 6px;
         }
 
-        .btn-primary { background: var(--primary); color: white; }
-        .btn-primary:hover { background: var(--primary-dark); }
-        .btn-secondary { background: white; color: var(--primary); border: 2px solid var(--primary); font-weight: 500; }
-        .btn-secondary:hover { background: var(--primary); color: white; }
-        .btn-danger { background: var(--danger); color: white; }
+        /* ✅ 2026-08-16 macOS 风格按钮 */
+        .btn-primary { background: #007aff; color: white; box-shadow: 0 2px 6px rgba(0,122,255,0.2); }
+        .btn-primary:hover { background: #0066d6; }
+        .btn-secondary { background: white; color: #007aff; border: 1px solid #007aff; font-weight: 500; }
+        .btn-secondary:hover { background: #007aff; color: white; }
+        .btn-danger { background: #ff3b30; color: white; }
         .btn-danger:hover { background: #c82333; }
         .btn-success { background: var(--success); color: white; }
         .btn-success:hover { background: #218838; }
@@ -212,15 +216,17 @@
         .btn-sm { padding: 5px 10px; font-size: 12px; }
 
         .lang-btn { min-width: 80px; }
+        /* ✅ 2026-08-16 macOS 风格 header 按钮 */
         .header .btn-secondary {
-            background: transparent;
-            color: white;
-            border: 2px solid rgba(255,255,255,0.5);
+            background: rgba(0,0,0,0.05);
+            color: #1d1d1f;
+            border: 1px solid rgba(0,0,0,0.08);
+            font-weight: 500;
         }
         .header .btn-secondary:hover, .header .btn-secondary.active {
-            background: white;
-            color: var(--secondary-dark);
-            border-color: white;
+            background: rgba(0,0,0,0.1);
+            color: #1d1d1f;
+            border-color: rgba(0,0,0,0.1);
         }
 
         /* Main Container */
@@ -239,32 +245,35 @@
             margin-bottom: 30px;
         }
 
+        /* ✅ 2026-08-16 macOS 风格 nav-card */
         .nav-card {
-            background: var(--bg-white);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 14px;
             padding: 25px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            border: 2px solid transparent;
+            transition: all 0.25s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04);
+            border: 1px solid rgba(0,0,0,0.06);
         }
 
         .nav-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-            border-color: var(--primary);
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
         }
 
         .nav-card-icon {
             width: 60px;
             height: 60px;
             margin: 0 auto 15px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            border-radius: 12px;
+            background: linear-gradient(135deg, #5ac8fa 0%, #007aff 100%);
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,122,255,0.25);
         }
 
         .nav-card-icon svg {
@@ -293,28 +302,33 @@
             gap: 20px;
         }
 
+        /* ✅ 2026-08-16 macOS 风格 stat-card */
         .stat-card {
-            background: var(--bg-white);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 14px;
             padding: 25px;
             display: flex;
             align-items: center;
             gap: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04);
+            border: 1px solid rgba(0,0,0,0.06);
         }
 
         .stat-icon {
             width: 60px;
             height: 60px;
-            border-radius: 12px;
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
 
-        .stat-icon.users { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); }
-        .stat-icon.sales { background: linear-gradient(135deg, var(--success) 0%, #1e7e34 100%); }
-        .stat-icon.debt { background: linear-gradient(135deg, var(--danger) 0%, #c82333 100%); }
+        .stat-icon.users { background: linear-gradient(135deg, #5ac8fa 0%, #007aff 100%); }
+        .stat-icon.sales { background: linear-gradient(135deg, #34c759 0%, #28a745 100%); }
+        .stat-icon.debt { background: linear-gradient(135deg, #ff6961 0%, #ff3b30 100%); }
 
         .stat-icon svg {
             width: 28px;
@@ -323,8 +337,8 @@
         }
 
         .stat-content { flex: 1; }
-        .stat-label { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
-        .stat-value { font-size: 28px; font-weight: 700; color: var(--text-dark); }
+        .stat-label { font-size: 12px; color: #86868b; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; }
+        .stat-value { font-size: 28px; font-weight: 700; color: #1d1d1f; }
 
         /* Section Title */
         .section-header {
@@ -335,19 +349,22 @@
         }
 
         .section-title {
-            font-size: 20px;
+            font-size: 22px;
             font-weight: 700;
-            color: var(--secondary-dark);
+            color: #1d1d1f;
         }
 
         .section-actions { display: flex; gap: 10px; }
 
-        /* User List Section */
+        /* ✅ 2026-08-16 macOS 风格 user-section */
         .user-section {
-            background: var(--bg-white);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 14px;
             padding: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04);
+            border: 1px solid rgba(0,0,0,0.06);
         }
 
         .search-bar {
@@ -358,16 +375,21 @@
 
         .search-input {
             flex: 1;
-            padding: 12px 15px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
+            padding: 10px 14px;
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.7);
             font-family: inherit;
             font-size: 14px;
+            color: #1d1d1f;
+            transition: all 0.2s;
         }
 
         .search-input:focus {
             outline: none;
-            border-color: var(--primary);
+            border-color: #007aff;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(0,122,255,0.15);
         }
 
         .filter-select {
@@ -380,31 +402,33 @@
             cursor: pointer;
         }
 
-        /* Table */
+        /* ✅ 2026-08-16 macOS 风格表格 */
         .user-table {
             width: 100%;
             border-collapse: collapse;
         }
 
         .user-table th {
-            background: var(--secondary);
-            color: white;
-            padding: 15px 12px;
+            background: rgba(0,0,0,0.03);
+            color: #86868b;
+            padding: 12px;
             text-align: left;
-            font-weight: 500;
+            font-weight: 600;
             font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
         }
 
         .user-table td {
-            padding: 15px 12px;
-            border-bottom: 1px solid var(--border);
+            padding: 14px 12px;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
             font-size: 14px;
+            color: #1d1d1f;
         }
 
         .user-table tbody tr:hover {
-            background: rgba(0,179,184,0.03);
+            background: rgba(0,122,255,0.04);
         }
 
         .user-table tbody tr:last-child td {
@@ -466,13 +490,17 @@
             overflow: hidden;
         }
 
+        /* ✅ 2026-08-16 macOS 风格 modal */
         .modal-header {
-            background: var(--secondary-dark);
-            color: white;
-            padding: 20px 25px;
+            background: rgba(248, 248, 250, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            color: #1d1d1f;
+            padding: 18px 25px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
         }
 
         .modal-header h3 {
