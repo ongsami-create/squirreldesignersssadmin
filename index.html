@@ -3462,7 +3462,7 @@ function renderDetailQuoteList(quotes) {
                     '<td>RM ' + formatNumber(debt) + '</td>' +
                     '<td>' + debtPct + '</td>' +
                     '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span>' + commBadge + '</td>' +
-                    '<td onclick="event.stopPropagation();">' +
+                    '<td onclick="event.stopPropagation();white-space:nowrap;">' +
                         '<button class="btn btn-xs btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')" style="margin-right:4px;">分享</button>' +
                         '<button class="btn btn-xs" onclick="openWithdrawModal(\'' + escapeHtml(q.projNo) + '\')" style="background:#dc3545;color:#fff;">撤回</button>' +
                     '</td>' +
