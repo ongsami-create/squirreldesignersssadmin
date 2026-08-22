@@ -1633,7 +1633,7 @@
                     </div>
                     <div style="display:flex;gap:10px;">
                         <button id="btnMark50" class="btn btn-sm btn-warning" onclick="markCommSettled(50)" style="background:#ffc107;color:#000;">✓ 标记50%已结算</button>
-                        <button id="btnMark100" class="btn btn-sm btn-success" onclick="markCommSettled(100)" style="background:#28a745 !important;color:#fff !important;cursor:not-allowed !important;opacity:0.5 !important;filter:grayscale(50%);" disabled title="请先标记50%已结算">✓ 标记100%已结算</button>
+                        <button id="btnMark100" class="btn btn-sm btn-success" onclick="markCommSettled(100)" style="background:#28a745 !important;color:#fff !important;">✓ 标记100%已结算</button>
                     </div>
                 </div>
             </div>
@@ -2465,13 +2465,8 @@
             commSettlementFilteredData = JSON.parse(JSON.stringify(userCommissions));
             renderCommSettlementTable();
 
-            // 数据加载完，判断 100% 按钮是否启用（按用户已标 50% 即可启用）(2026-06-16)
-            // 修复：用 settled50 而不是 project50Saved
-            const anyUser50Settled = userCommissions.some(d => d.settled50);
-            if (anyUser50Settled) {
-                const btn100 = document.getElementById('btnMark100');
-                if (btn100) { btn100.disabled = false; btn100.style.opacity = '1'; btn100.title = ''; }
-            }
+            // ✅ 2026-08-22 修复：删除 100% 按钮 enable 逻辑
+            //   按钮现在永远 enabled（markCommSettled 内部会检查 settled50）
         }
 
         // 打开佣金结算弹窗
@@ -2483,11 +2478,13 @@
             document.getElementById('commSettlementUserName').textContent = displayName;
             document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:#999;">加载中...</p>';
             document.getElementById('commSettlementModal').style.display = 'flex';
-            
-            // 默认禁用 100% 按钮，等数据加载完再判断 (2026-06-15)
-            const btn100 = document.getElementById('btnMark100');
-            if (btn100) { btn100.disabled = true; btn100.style.opacity = '0.5'; btn100.title = currentLang==='zh'?'请先标记50%已结算':'Please mark 50% settled first'; }
-            
+
+            // ✅ 2026-08-22 修复：100% 按钮不再强制 disabled
+            //   markCommSettled(100) 函数内部已经检查 settled50（line 2794-2807）
+            //   如果没标 50% 会弹 alert 提示"请先标记 50% 已结算"
+            //   所以不需要按钮 disabled 状态，删除禁用代码
+            //   解决 bug：用户已标 50% 想标 100% 时，unsettled tab 找不到 50% 已结算的，按钮也 disabled，无解
+
             // 清空筛选条件
             document.getElementById('commSearchProjNo').value = '';
             document.getElementById('commDateFrom').value = '';
