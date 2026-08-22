@@ -2803,14 +2803,53 @@
                 }
             }
 
+            // ✅ 2026-08-22 防重保护：统计已发过工资的（避免重复标记 + 时间戳覆盖）
+            const alreadySettled = [];
+            checkedBoxes.forEach(cb => {
+                const idx = parseInt(cb.dataset.idx);
+                const d = commSettlementFilteredData[idx];
+                if (!d || !d.quote) return;
+                if (type === 50 && d.quote.settled50 && d.quote.settled50[commSettlementKey]) {
+                    alreadySettled.push(d.projNo);
+                }
+                if (type === 100 && d.quote.settled100 && d.quote.settled100[commSettlementKey]) {
+                    alreadySettled.push(d.projNo);
+                }
+            });
+            // 如果所有勾选都已被标记，弹窗提示并退出
+            if (alreadySettled.length > 0 && alreadySettled.length === checkedBoxes.length) {
+                alert((lang?`以下项目已标记 ${type}% 已发工资，无需重复操作：\n`:`The following projects have already been marked as ${type}% settled:\n`) + alreadySettled.join(', '));
+                return;
+            }
+            // 如果部分已发，提示但继续（剩下的会处理）
+            if (alreadySettled.length > 0) {
+                const confirmMsg = lang
+                    ? `以下项目已标记 ${type}% 已发工资，会被跳过：\n${alreadySettled.join(', ')}\n\n继续处理其他项目吗？`
+                    : `The following projects have already been marked as ${type}% settled and will be skipped:\n${alreadySettled.join(', ')}\n\nContinue with the rest?`;
+                if (!confirm(confirmMsg)) return;
+            }
+
             const settleLabel = type === 50 ? '50%' : '100%';
             let successCount = 0;
             let errorCount = 0;
+            let skippedCount = 0;
 
             for (const cb of checkedBoxes) {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
                 if (!d || !d.quote) continue;
+
+                // ✅ 2026-08-22 防重保护（再检查一次）：如果已发过，跳过
+                if (type === 50 && d.quote.settled50 && d.quote.settled50[commSettlementKey]) {
+                    cb.disabled = true;
+                    skippedCount++;
+                    continue;
+                }
+                if (type === 100 && d.quote.settled100 && d.quote.settled100[commSettlementKey]) {
+                    cb.disabled = true;
+                    skippedCount++;
+                    continue;
+                }
 
                 try {
                     const projNo = d.quote.projNo;
@@ -2837,14 +2876,14 @@
                     postData.append('username', realOwner);
                     postData.append('projNo', projNo);
                     postData.append('quoteData', JSON.stringify(updatedQuote));
-                    
+
                     const response = await fetch(GAS_URL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: postData
                     });
                     const result = await response.json();
-                    
+
                     if (result.success) {
                         // ✅ 批 2.2：标记成功失效缓存（避免下次还看到未结算）
                         invalidateCommCache(commSettlementKey);
@@ -2867,7 +2906,14 @@
                     errorCount++;
                 }
             }
-            
+
+            // ✅ 2026-08-22：toast 报告防重保护的跳过数
+            if (skippedCount > 0 && successCount === 0) {
+                showToast((lang?`全部 ${skippedCount} 个已发过 ${settleLabel}，跳过`:`All ${skippedCount} already settled, skipped`), 'warning');
+            } else if (skippedCount > 0) {
+                showToast((lang?`成功 ${successCount}，跳过 ${skippedCount}（已发过）`:`${successCount} marked, ${skippedCount} skipped (already settled)`), 'success');
+            }
+
             if (successCount > 0) {
                 // 标记 50% 成功后，启用 100% 按钮（业务规则：未标 50% 不能标 100%）(2026-06-15)
                 if (type === 50) {
