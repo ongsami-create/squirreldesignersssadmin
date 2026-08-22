@@ -2517,10 +2517,10 @@
             html += '<th style="padding:10px;border:1px solid #ddd;text-align:right;">' + (lang?'100%':'100%') + '</th>';
             html += '<th style="padding:10px;border:1px solid #ddd;text-align:right;">' + (lang?'扣除':'Deduct') + '</th>';
             html += '<th style="padding:10px;border:1px solid #ddd;text-align:center;">' + (lang?'状态':'Status') + '</th>';
-            // ✅ 2026-08-08 批 3：已结算 tab 加"标记时间"列
-            if (_currentCommTab === 'settled' || _currentCommTab === 'all') {
-                html += '<th style="padding:10px;border:1px solid #ddd;text-align:left;width:140px;">' + (lang?'标记时间':'Marked At') + '</th>';
-            }
+            // ✅ 2026-08-22：所有 tab 都加"标记时间"列
+            //   - unsettled: 显示该用户上次发 50% 的时间（如果有），避免重复算
+            //   - settled/all: 显示完整历史 + 查看历史按钮
+            html += '<th style="padding:10px;border:1px solid #ddd;text-align:left;width:160px;">' + (lang?'标记时间':'Marked At') + '</th>';
             html += '</tr></thead><tbody>';
             
             data.forEach((d, idx) => {
@@ -2558,9 +2558,43 @@
                     html += '<span style="background:#6c757d;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">-</span>';
                 }
                 html += '</td>';
-                // ✅ 2026-08-08 批 3：已结算/全部 tab 加"标记时间"列 + "查看历史"按钮
-                if (_currentCommTab === 'settled' || _currentCommTab === 'all') {
-                    html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;line-height:1.4;min-width:140px;">';
+                // ✅ 2026-08-22：所有 tab 都有"标记时间"列（不同 tab 显示内容不同）
+                if (_currentCommTab === 'unsettled') {
+                    // 未结算 tab：只显示该用户上次发 50% 的时间（如果有），避免重复算
+                    //   这种情况：项目整体没发 50%，但其他用户可能发过 → 显示 "其他用户 [date] 已发 50%"
+                    //   或者本用户之前发过又 unmark 过 → 显示 "上次 [date] 发 50%（已撤回）"
+                    html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;line-height:1.4;">';
+                    let lastUserMark = '';
+                    if (d.quote && d.quote.settled50) {
+                        // 检查本用户发过没
+                        if (d.quote.settled50[commSettlementKey]) {
+                            lastUserMark = d.quote.settled50[commSettlementKey];
+                            html += '<div style="color:#28a745;font-size:11px;font-weight:600;">' + (lang?'已发 50%':'Settled 50%') + '</div>';
+                            html += '<div style="color:#666;font-size:11px;">' + formatDateTime(lastUserMark) + '</div>';
+                        } else {
+                            // 其他用户发过 50%
+                            const otherUsers = Object.keys(d.quote.settled50).filter(function(u) { return u !== commSettlementKey; });
+                            if (otherUsers.length > 0) {
+                                const lastOther = otherUsers.map(function(u) { return d.quote.settled50[u]; }).sort().pop();
+                                const lastOtherUser = otherUsers.sort(function(a, b) {
+                                    return d.quote.settled50[a] > d.quote.settled50[b] ? -1 : 1;
+                                })[0];
+                                html += '<div style="color:#fd7e14;font-size:11px;font-weight:600;">' + (lang?'其他用户已发':'Other user settled') + '</div>';
+                                html += '<div style="color:#666;font-size:11px;">' + formatDateTime(lastOther) + '</div>';
+                                html += '<div style="color:#999;font-size:10px;">by ' + escapeHtml(lastOtherUser) + '</div>';
+                            } else {
+                                html += '<span style="color:#999;font-size:11px;">-</span>';
+                            }
+                        }
+                    } else {
+                        html += '<span style="color:#999;font-size:11px;">-</span>';
+                    }
+                    // 历史按钮（unsettled 也能查）
+                    html += '<button onclick="showCommHistory(' + idx + ')" style="margin-top:4px;padding:2px 6px;background:#fff;border:1px solid #00B3B8;color:#00B3B8;border-radius:3px;cursor:pointer;font-size:10px;">' + (lang?'查看历史':'History') + '</button>';
+                    html += '</td>';
+                } else {
+                    // ✅ 2026-08-08 批 3：已结算/全部 tab 加"标记时间"列 + "查看历史"按钮
+                    html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;line-height:1.4;min-width:160px;">';
                     // 找本用户（commSettlementKey）的最后 mark50/mark100/unmark 时间
                     let lastMarkTime = '';
                     let lastMarkBy = '';
