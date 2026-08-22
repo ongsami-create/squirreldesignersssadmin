@@ -778,6 +778,17 @@
             border-bottom: 1px solid var(--border);
         }
 
+        /* ✅ 2026-08-22：报价列表操作列（最后一列）固定最小宽度，让两个按钮并排 */
+        .quote-table th:last-child,
+        .quote-table td:last-child {
+            min-width: 150px;
+            white-space: nowrap;
+        }
+        .quote-table td:last-child button {
+            display: inline-block;
+            vertical-align: middle;
+        }
+
         .quote-table tbody tr:hover {
             background: rgba(0,179,184,0.03);
             cursor: pointer;
