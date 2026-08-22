@@ -608,6 +608,27 @@
             display: none;
         }
 
+        /* ✅ 2026-08-22：左右两栏布局（左侧 1/3 信息，右侧 2/3 报价列表） */
+        .user-details-layout {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            align-items: start;
+        }
+        .details-left { display: flex; flex-direction: column; gap: 20px; }
+        .details-right { display: flex; flex-direction: column; min-width: 0; }
+        /* 报价列表满屏：限制高度 + 内部滚动 */
+        .quote-list-section {
+            max-height: calc(100vh - 180px);
+            overflow-y: auto;
+        }
+        .quote-list-section .quote-table thead th {
+            position: sticky;
+            top: 0;
+            background: rgba(0,0,0,0.03);
+            z-index: 1;
+        }
+
         .user-details-page.active {
             display: block;
         }
@@ -642,11 +663,13 @@
         }
 
         .user-info-card {
-            background: var(--bg-white);
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 14px;
             padding: 25px;
-            margin-bottom: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04);
+            border: 1px solid rgba(0,0,0,0.06);
         }
 
         .user-info-header {
@@ -751,10 +774,13 @@
 
         /* Quote List in Details */
         .quote-list-section {
-            background: var(--bg-white);
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 14px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04);
+            border: 1px solid rgba(0,0,0,0.06);
         }
 
         .quote-table {
@@ -852,6 +878,12 @@
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
         /* Responsive */
+        @media (max-width: 1024px) {
+            /* 用户详情页：中等屏幕改单列 */
+            .user-details-layout {
+                grid-template-columns: 1fr;
+            }
+        }
         @media (max-width: 768px) {
             .nav-cards {
                 grid-template-columns: repeat(2, 1fr);
@@ -1259,73 +1291,78 @@
                 <span data-i18n="backToList">返回列表</span>
             </button>
 
-            <!-- User Info Card -->
-            <div class="user-info-card" id="userInfoCard">
-                <div class="user-info-header">
-                    <div class="user-avatar" id="detailAvatar">T</div>
-                    <div class="user-info-details">
-                        <h2 id="detailDisplayName">TEST</h2>
-                        <p id="detailAccount">@test</p>
+            <!-- ✅ 2026-08-22：左右两栏布局（左侧 1/3 信息，右侧 2/3 报价列表） -->
+            <div class="user-details-layout">
+                <div class="details-left">
+                    <!-- User Info Card -->
+                    <div class="user-info-card" id="userInfoCard">
+                        <div class="user-info-header">
+                            <div class="user-avatar" id="detailAvatar">T</div>
+                            <div class="user-info-details">
+                                <h2 id="detailDisplayName">TEST</h2>
+                                <p id="detailAccount">@test</p>
+                            </div>
+                        </div>
+                        <div class="user-info-grid">
+                            <div class="user-info-item">
+                                <label data-i18n="department">部门</label>
+                                <span id="detailDepartment">销售</span>
+                            </div>
+                            <div class="user-info-item">
+                                <label data-i18n="status">状态</label>
+                                <span id="detailStatus"><span class="status-badge status-active">启用</span></span>
+                            </div>
+                            <div class="user-info-item">
+                                <label data-i18n="lastLogin">最后登录</label>
+                                <span id="detailLastLogin">2026/05/17 09:43</span>
+                            </div>
+                            <div class="user-info-item">
+                                <label data-i18n="quoteCount">报价数量</label>
+                                <span id="detailQuoteCount">15</span>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <div class="user-info-grid">
-                    <div class="user-info-item">
-                        <label data-i18n="department">部门</label>
-                        <span id="detailDepartment">销售</span>
-                    </div>
-                    <div class="user-info-item">
-                        <label data-i18n="status">状态</label>
-                        <span id="detailStatus"><span class="status-badge status-active">启用</span></span>
-                    </div>
-                    <div class="user-info-item">
-                        <label data-i18n="lastLogin">最后登录</label>
-                        <span id="detailLastLogin">2026/05/17 09:43</span>
-                    </div>
-                    <div class="user-info-item">
-                        <label data-i18n="quoteCount">报价数量</label>
-                        <span id="detailQuoteCount">15</span>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Stats for this user -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon sales">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="1" x2="12" y2="23"></line>
-                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                        </svg>
+                    <!-- Stats for this user -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon sales">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-label" data-i18n="totalAmount">总金额</div>
+                                <div class="stat-value" id="detailTotalSales">RM 22,450</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon debt">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-label" data-i18n="debtAmount">欠款金额</div>
+                                <div class="stat-value" id="detailTotalDebt">RM 16,550</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="stat-content">
-                        <div class="stat-label" data-i18n="totalAmount">总金额</div>
-                        <div class="stat-value" id="detailTotalSales">RM 22,450</div>
+
+                    <!-- Activity Log -->
+                    <div class="activity-section" style="display:none;">
+                        <h3 class="section-title" style="margin-bottom: 15px;" data-i18n="activityLog">操作记录</h3>
+                        <div class="activity-list" id="detailActivityLog">2026-05-17 09:43登录Logged in successfully2026-05-17 09:39登录Logged in successfully2026-05-17 09:17保存报价Saved quote: smandi2026-05-17 09:16保存报价Saved quote: SGRACE</div>
                     </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-icon debt">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                            <line x1="12" y1="9" x2="12" y2="13"></line>
-                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                        </svg>
-                    </div>
-                    <div class="stat-content">
-                        <div class="stat-label" data-i18n="debtAmount">欠款金额</div>
-                        <div class="stat-value" id="detailTotalDebt">RM 16,550</div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Activity Log -->
-            <div class="activity-section" style="display:none;">
-                <h3 class="section-title" style="margin-bottom: 15px;" data-i18n="activityLog">操作记录</h3>
-                <div class="activity-list" id="detailActivityLog">2026-05-17 09:43登录Logged in successfully2026-05-17 09:39登录Logged in successfully2026-05-17 09:17保存报价Saved quote: smandi2026-05-17 09:16保存报价Saved quote: SGRACE</div>
-            </div>
-
-            <!-- Quote List -->
-            <div class="quote-list-section" style="margin-top: 25px;">
-<h3 class="section-title" style="margin-bottom: 15px;" data-i18n="quoteList">报价列表</h3>
+                <div class="details-right">
+                    <!-- Quote List -->
+                    <div class="quote-list-section">
+                        <h3 class="section-title" style="margin-bottom: 15px;" data-i18n="quoteList">报价列表</h3>
                 <table class="quote-table">
                     <thead>
                         <tr>
@@ -1342,6 +1379,8 @@
                     <tbody id="detailQuoteList"></tbody>
                 </table>
             </div>
+                </div><!-- /.details-right -->
+            </div><!-- /.user-details-layout -->
         </div>
     </div>
     <!-- Quote Detail Modal -->
