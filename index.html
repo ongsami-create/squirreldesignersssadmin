@@ -214,6 +214,7 @@
         .btn-success:hover { background: #218838; }
         .btn-warning { background: var(--warning); color: var(--text-dark); }
         .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-xs { padding: 3px 8px; font-size: 11px; border-radius: 4px; line-height: 1.4; }
 
         .lang-btn { min-width: 80px; }
         /* ✅ 2026-08-16 macOS 风格 header 按钮 */
@@ -411,19 +412,19 @@
         .user-table th {
             background: rgba(0,0,0,0.03);
             color: #86868b;
-            padding: 12px;
+            padding: 14px;
             text-align: left;
             font-weight: 600;
-            font-size: 12px;
+            font-size: 14px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             border-bottom: 1px solid rgba(0,0,0,0.08);
         }
 
         .user-table td {
-            padding: 14px 12px;
+            padding: 16px 14px;
             border-bottom: 1px solid rgba(0,0,0,0.05);
-            font-size: 14px;
+            font-size: 15px;
             color: #1d1d1f;
         }
 
@@ -3462,8 +3463,8 @@ function renderDetailQuoteList(quotes) {
                     '<td>' + debtPct + '</td>' +
                     '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span>' + commBadge + '</td>' +
                     '<td onclick="event.stopPropagation();">' +
-                        '<button class="btn btn-sm btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')" style="margin-right:4px;">分享</button>' +
-                        '<button class="btn btn-sm" onclick="openWithdrawModal(\'' + escapeHtml(q.projNo) + '\')" style="background:#dc3545;color:#fff;">撤回</button>' +
+                        '<button class="btn btn-xs btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')" style="margin-right:4px;">分享</button>' +
+                        '<button class="btn btn-xs" onclick="openWithdrawModal(\'' + escapeHtml(q.projNo) + '\')" style="background:#dc3545;color:#fff;">撤回</button>' +
                     '</td>' +
                 '</tr>';
             }).join('');
