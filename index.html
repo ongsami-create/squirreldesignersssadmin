@@ -2274,7 +2274,7 @@
 
             // ✅ 批 2.2：5 分钟内不重复拉（用 localStorage 缓存）
             // ✅ v3.22h 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v22h_' + commSettlementKey + '_' + _currentCommTab;
+            const cacheKey = 'commCache_v22i_' + commSettlementKey + '_' + _currentCommTab;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
             if (!forceRefresh) {
@@ -2318,9 +2318,10 @@
         function invalidateCommCache(username) {
             if (!username) return;
             ['unsettled', 'settled', 'all'].forEach(function(tab) {
-                // ✅ v3.22h: 同时清旧版本 key (commCache_) 和新版本 key (commCache_v22h_)
+                // ✅ v3.22i: 同时清所有历史版本 cache key
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
+                try { localStorage.removeItem('commCache_v22i_' + username + '_' + tab); } catch (e) {}
             });
         }
 
@@ -2342,12 +2343,30 @@
                 renderCommSettlementTable();
                 return;
             }
-            // ✅ 2026-08-31 v3.22h: tab 过滤
+            // ✅ 2026-08-31 v3.22i: tab 过滤 (兼容旧 + 新 Pct 格式)
             // 已结 = 当前账号 50% 和 100% 都有勾 (两边都没数字的 quote 不显示)
-            // ⚠️ 关键: Pct 字段的 key 是 username (账号), 不是 displayName
+            // Pct 字段格式:
+            //   旧 (user-keyed 对象): commission50Pct = { PSD: 50, FSD: 30 }
+            //   新 (per-role):         salespersonCommissionPct50, designerCommissionPct50, etc.
+            function _poolHasPctFE(q, pool) {
+                const oldKey = pool === '50' ? 'commission50Pct' : 'commission100Pct';
+                const newKeys = pool === '50'
+                    ? ['salespersonCommissionPct50','subSalespersonCommissionPct50','designerCommissionPct50','measurementEngineerCommissionPct50','generalManagerCommissionPct50']
+                    : ['salespersonCommissionPct100','subSalespersonCommissionPct100','designerCommissionPct100','measurementEngineerCommissionPct100','generalManagerCommissionPct100'];
+                if (q[oldKey] && typeof q[oldKey] === 'object') {
+                    const keys = Object.keys(q[oldKey]);
+                    for (let i = 0; i < keys.length; i++) {
+                        if (typeof q[oldKey][keys[i]] === 'number' && q[oldKey][keys[i]] > 0) return true;
+                    }
+                }
+                for (let i = 0; i < newKeys.length; i++) {
+                    if (typeof q[newKeys[i]] === 'number' && q[newKeys[i]] > 0) return true;
+                }
+                return false;
+            }
             function _isFullySettledForCurrentUser(q) {
-                const has50Pct = q.commission50Pct && Object.keys(q.commission50Pct).some(function(k) { return typeof q.commission50Pct[k] === 'number' && q.commission50Pct[k] > 0; });
-                const has100Pct = q.commission100Pct && Object.keys(q.commission100Pct).some(function(k) { return typeof q.commission100Pct[k] === 'number' && q.commission100Pct[k] > 0; });
+                const has50Pct = _poolHasPctFE(q, '50');
+                const has100Pct = _poolHasPctFE(q, '100');
                 if (!has50Pct && !has100Pct) return null; // 两边都没数据, 不归类
                 const s50 = q.settled50 && q.settled50[commSettlementKey];
                 const s100 = q.settled100 && q.settled100[commSettlementKey];
