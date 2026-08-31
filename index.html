@@ -2273,7 +2273,8 @@
             forceRefresh = !!forceRefresh;
 
             // ✅ 批 2.2：5 分钟内不重复拉（用 localStorage 缓存）
-            const cacheKey = 'commCache_' + commSettlementKey + '_' + _currentCommTab;
+            // ✅ v3.22h 加版本后缀, 自动失效旧 cache
+            const cacheKey = 'commCache_v22h_' + commSettlementKey + '_' + _currentCommTab;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
             if (!forceRefresh) {
@@ -2317,7 +2318,9 @@
         function invalidateCommCache(username) {
             if (!username) return;
             ['unsettled', 'settled', 'all'].forEach(function(tab) {
+                // ✅ v3.22h: 同时清旧版本 key (commCache_) 和新版本 key (commCache_v22h_)
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
+                try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
             });
         }
 
@@ -2339,13 +2342,22 @@
                 renderCommSettlementTable();
                 return;
             }
-            // ✅ 批 2.1：tab 过滤（settled tab 只显示已结算的，unsettled tab 只显示未结算的）
-            // GAS 端 includeSettled=true 时返回全部，前端再按 tab 过滤
+            // ✅ 2026-08-31 v3.22h: tab 过滤
+            // 已结 = 当前账号 50% 和 100% 都有勾 (两边都没数字的 quote 不显示)
+            // ⚠️ 关键: Pct 字段的 key 是 username (账号), 不是 displayName
+            function _isFullySettledForCurrentUser(q) {
+                const has50Pct = q.commission50Pct && Object.keys(q.commission50Pct).some(function(k) { return typeof q.commission50Pct[k] === 'number' && q.commission50Pct[k] > 0; });
+                const has100Pct = q.commission100Pct && Object.keys(q.commission100Pct).some(function(k) { return typeof q.commission100Pct[k] === 'number' && q.commission100Pct[k] > 0; });
+                if (!has50Pct && !has100Pct) return null; // 两边都没数据, 不归类
+                const s50 = q.settled50 && q.settled50[commSettlementKey];
+                const s100 = q.settled100 && q.settled100[commSettlementKey];
+                return (!has50Pct || s50) && (!has100Pct || s100);
+            }
             let filteredQuotes = data.quotes;
             if (_currentCommTab === 'settled') {
-                filteredQuotes = data.quotes.filter(function(q) { return q.settled50 && q.settled50[commSettlementKey]; });
+                filteredQuotes = data.quotes.filter(function(q) { return _isFullySettledForCurrentUser(q) === true; });
             } else if (_currentCommTab === 'unsettled') {
-                filteredQuotes = data.quotes.filter(function(q) { return !(q.settled50 && q.settled50[commSettlementKey]); });
+                filteredQuotes = data.quotes.filter(function(q) { return _isFullySettledForCurrentUser(q) === false; });
             }
 
             const projectCommMap = {}; // 按项目合并
