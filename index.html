@@ -2274,7 +2274,7 @@
 
             // ✅ 批 2.2：5 分钟内不重复拉（用 localStorage 缓存）
             // ✅ v3.22h 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v22i_' + commSettlementKey + '_' + _currentCommTab;
+            const cacheKey = 'commCache_v22j_' + commSettlementKey + '_' + _currentCommTab;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
             if (!forceRefresh) {
@@ -2318,10 +2318,11 @@
         function invalidateCommCache(username) {
             if (!username) return;
             ['unsettled', 'settled', 'all'].forEach(function(tab) {
-                // ✅ v3.22i: 同时清所有历史版本 cache key
+                // ✅ v3.22j: 同时清所有历史版本 cache key
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22i_' + username + '_' + tab); } catch (e) {}
+                try { localStorage.removeItem('commCache_v22j_' + username + '_' + tab); } catch (e) {}
             });
         }
 
@@ -2368,9 +2369,11 @@
                 const has50Pct = _poolHasPctFE(q, '50');
                 const has100Pct = _poolHasPctFE(q, '100');
                 if (!has50Pct && !has100Pct) return null; // 两边都没数据, 不归类
-                const s50 = q.settled50 && q.settled50[commSettlementKey];
-                const s100 = q.settled100 && q.settled100[commSettlementKey];
-                return (!has50Pct || s50) && (!has100Pct || s100);
+                // ✅ 2026-08-31 v3.22j: 用 !! 强转 boolean, 防止 undefined 漏过滤
+                //   之前: (true || undefined) && (false || undefined) = undefined, 但过滤器用 === false, undefined !== false → 漏过滤
+                const s50 = !!(q.settled50 && q.settled50[commSettlementKey]);
+                const s100 = !!(q.settled100 && q.settled100[commSettlementKey]);
+                return (has50Pct ? s50 : true) && (has100Pct ? s100 : true);
             }
             let filteredQuotes = data.quotes;
             if (_currentCommTab === 'settled') {
