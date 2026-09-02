@@ -2320,7 +2320,7 @@
             // ✅ 批 2.2：5 分钟内不重复拉（用 localStorage 缓存）
             // ✅ v3.23: 改用 getSettlementView (读索引 + 结算文件, 10s → 1s)
             // ✅ v3.22j 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v23_' + commSettlementKey + '_' + _currentCommTab;
+            const cacheKey = 'commCache_v24_' + commSettlementKey + '_' + _currentCommTab;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
             if (!forceRefresh) {
@@ -2365,12 +2365,13 @@
         function invalidateCommCache(username) {
             if (!username) return;
             ['unsettled', 'settled', 'all'].forEach(function(tab) {
-                // ✅ v3.23: 同时清所有历史版本 cache key
+                // ✅ v3.24: 同时清所有历史版本 cache key
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22i_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22j_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v23_' + username + '_' + tab); } catch (e) {}
+                try { localStorage.removeItem('commCache_v24_' + username + '_' + tab); } catch (e) {}
             });
         }
 
@@ -2448,10 +2449,11 @@
                 const debt = grandTotal - paidAmount;
                 const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
 
-                // 修复：佣金基数要用 splitDepositToPools 按池分开（与 Quote Details 一致）(2026-06-15)
-                const _pool = splitDepositToPools(quote);
-                const paidAmount50 = _pool.amount50;
-                const paidAmount100 = _pool.amount100;
+                // ✅ 2026-09-02 v3.24: 直接用索引里的 paidAmount50/100 字段
+                //   之前用 splitDepositToPools(quote.depositRecords) 但 v3.23 索引没存 depositRecords
+                //   改用 quote.paidAmount50 / paidAmount100 (索引里已有, 跟 Quote Details 数值一致)
+                const paidAmount50 = Number(quote.paidAmount50) || 0;
+                const paidAmount100 = Number(quote.paidAmount100) || 0;
 
                 // 角色列表（使用扁平字段结构，与保存时一致）
                 const roles = [
