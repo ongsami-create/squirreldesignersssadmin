@@ -1606,8 +1606,8 @@
                         <select id="commStatusFilter" style="padding:6px 10px;border:1px solid #ddd;border-radius:4px;" onchange="filterCommSettlement()">
                             <option value="all">全部</option>
                             <option value="unsettled">未结算</option>
-                            <option value="settled50">已结算50%</option>
-                            <option value="settled100">已结算100%</option>
+                            <option value="settled50">50%已结算</option>
+                            <option value="settled100">100%已结算</option>
                         </select>
                     </div>
                     <div style="margin-left:auto;display:flex;gap:10px;align-items:flex-end;">
@@ -1617,17 +1617,20 @@
                         <button class="btn btn-sm btn-info" onclick="exportCommSettlementExcel()" style="background:#28a745;color:#fff;">📊 导出Excel</button>
                     </div>
                 </div>
-                <!-- ✅ 2026-08-08 优化：3-tab 切换 + 数字 badge（批 2.1） -->
+                <!-- ✅ v3.26 4-tab 设计: 未结算 / 50%已结算 / 100%已结算 / 全部 -->
                 <div id="commSettlementBadge" style="margin:8px 0;padding:8px 12px;background:#f0f8ff;border-radius:4px;">
                     <div style="display:flex;gap:0;margin-bottom:8px;">
-                        <button class="comm-tab-btn active" data-tab="unsettled" onclick="switchCommSettleTab('unsettled')" id="commTabUnsettled" style="flex:1;padding:8px 12px;border:1px solid #00B3B8;background:#00B3B8;color:#fff;border-radius:4px 0 0 4px;cursor:pointer;font-size:13px;font-weight:600;">
-                            未结算 <span id="commTabUnsettledCount" style="background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:8px;margin-left:4px;">0</span>
+                        <button class="comm-tab-btn active" data-tab="unsettled" onclick="switchCommSettleTab('unsettled')" id="commTabUnsettled" style="flex:1;padding:8px 8px;border:1px solid #00B3B8;background:#00B3B8;color:#fff;border-radius:4px 0 0 4px;cursor:pointer;font-size:12px;font-weight:600;">
+                            未结算 <span id="commTabUnsettledCount" style="background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:8px;margin-left:2px;">0</span>
                         </button>
-                        <button class="comm-tab-btn" data-tab="settled" onclick="switchCommSettleTab('settled')" id="commTabSettled" style="flex:1;padding:8px 12px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:0;cursor:pointer;font-size:13px;font-weight:600;">
-                            已结算 <span id="commTabSettledCount" style="background:rgba(40,167,69,0.15);padding:1px 6px;border-radius:8px;margin-left:4px;">0</span>
+                        <button class="comm-tab-btn" data-tab="settled50" onclick="switchCommSettleTab('settled50')" id="commTabSettled50" style="flex:1;padding:8px 8px;border:1px solid #17a2b8;background:#fff;color:#17a2b8;border-radius:0;cursor:pointer;font-size:12px;font-weight:600;">
+                            50%已结算 <span id="commTabSettled50Count" style="background:rgba(23,162,184,0.15);padding:1px 6px;border-radius:8px;margin-left:2px;">0</span>
                         </button>
-                        <button class="comm-tab-btn" data-tab="all" onclick="switchCommSettleTab('all')" id="commTabAll" style="flex:1;padding:8px 12px;border:1px solid #666;background:#fff;color:#666;border-radius:0 4px 4px 0;cursor:pointer;font-size:13px;font-weight:600;">
-                            全部 <span id="commTabAllCount" style="background:rgba(102,102,102,0.15);padding:1px 6px;border-radius:8px;margin-left:4px;">0</span>
+                        <button class="comm-tab-btn" data-tab="settled100" onclick="switchCommSettleTab('settled100')" id="commTabSettled100" style="flex:1;padding:8px 8px;border:1px solid #28a745;background:#fff;color:#28a745;border-radius:0;cursor:pointer;font-size:12px;font-weight:600;">
+                            100%已结算 <span id="commTabSettled100Count" style="background:rgba(40,167,69,0.15);padding:1px 6px;border-radius:8px;margin-left:2px;">0</span>
+                        </button>
+                        <button class="comm-tab-btn" data-tab="all" onclick="switchCommSettleTab('all')" id="commTabAll" style="flex:1;padding:8px 8px;border:1px solid #666;background:#fff;color:#666;border-radius:0 4px 4px 0;cursor:pointer;font-size:12px;font-weight:600;">
+                            全部 <span id="commTabAllCount" style="background:rgba(102,102,102,0.15);padding:1px 6px;border-radius:8px;margin-left:2px;">0</span>
                         </button>
                     </div>
                     <div style="font-size:11px;color:#999;text-align:right;">
@@ -2317,10 +2320,9 @@
             if (!commSettlementKey) return;
             forceRefresh = !!forceRefresh;
 
-            // ✅ 批 2.2：5 分钟内不重复拉（用 localStorage 缓存）
-            // ✅ v3.23: 改用 getSettlementView (读索引 + 结算文件, 10s → 1s)
+            // ✅ v3.26: 改用 getUserSettlements (读 commission_settlement.json + 扫 quote, 4 tab 数据)
             // ✅ v3.22j 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v24_' + commSettlementKey + '_' + _currentCommTab;
+            const cacheKey = 'commCache_v26_' + commSettlementKey;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
             if (!forceRefresh) {
@@ -2339,12 +2341,11 @@
             if (cacheStatusEl) cacheStatusEl.textContent = '加载中…';
 
             try {
-                const includeSettled = (_currentCommTab === 'settled' || _currentCommTab === 'all');
-                // ✅ v3.23: 改用 getSettlementView 走索引 (快 50x)
-                const response = await fetch(GAS_URL + '?action=getSettlementView&username=' + encodeURIComponent(commSettlementKey));
+                // ✅ v3.26: 调 getUserSettlements (单一数据源 commission_settlement.json)
+                const response = await fetch(GAS_URL + '?action=getUserSettlements&username=' + encodeURIComponent(commSettlementKey));
                 const data = await response.json();
                 _processCommSettlementData(data);
-                // ✅ 写缓存
+                // ✅ 写缓存 (v3.26 一个 user 一个 cache, 不分 tab)
                 try {
                     localStorage.setItem(cacheKey, JSON.stringify({
                         data: data,
@@ -2364,8 +2365,10 @@
         // 标记结算后失效该用户的所有 cache（避免显示旧状态）
         function invalidateCommCache(username) {
             if (!username) return;
-            ['unsettled', 'settled', 'all'].forEach(function(tab) {
-                // ✅ v3.24: 同时清所有历史版本 cache key
+            // ✅ v3.26: 单一 cache key, 无 tab 区分
+            try { localStorage.removeItem('commCache_v26_' + username); } catch (e) {}
+            // 清历史版本 cache
+            ['unsettled', 'settled', 'settled50', 'settled100', 'all'].forEach(function(tab) {
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22i_' + username + '_' + tab); } catch (e) {}
@@ -2377,15 +2380,16 @@
 
         // ✅ 2026-08-08 优化：共用数据处理函数（处理 tab badge + 渲染表格 + 启用 100% 按钮）
         function _processCommSettlementData(data) {
-            // ✅ 批 2.1：更新 3-tab 数字 badge
+            // ✅ v3.26: 4-tab 数字 badge (从 data.counts 读)
             const tabUnsettledCount = document.getElementById('commTabUnsettledCount');
-            const tabSettledCount = document.getElementById('commTabSettledCount');
+            const tabSettled50Count = document.getElementById('commTabSettled50Count');
+            const tabSettled100Count = document.getElementById('commTabSettled100Count');
             const tabAllCount = document.getElementById('commTabAllCount');
-            if (data && data.totalUnsettled !== undefined) {
-                const total = (data.totalUnsettled || 0) + (data.totalSettled || 0);
-                if (tabUnsettledCount) tabUnsettledCount.textContent = data.totalUnsettled || 0;
-                if (tabSettledCount) tabSettledCount.textContent = data.totalSettled || 0;
-                if (tabAllCount) tabAllCount.textContent = total;
+            if (data && data.counts) {
+                if (tabUnsettledCount) tabUnsettledCount.textContent = data.counts.unsettled || 0;
+                if (tabSettled50Count) tabSettled50Count.textContent = data.counts.settled50 || 0;
+                if (tabSettled100Count) tabSettled100Count.textContent = data.counts.settled100 || 0;
+                if (tabAllCount) tabAllCount.textContent = data.counts.all || 0;
             }
             if (!data || !data.success || !data.quotes || data.quotes.length === 0) {
                 commSettlementAllData = [];
@@ -2424,12 +2428,17 @@
                 const s100 = !!(q.settled100 && q.settled100[commSettlementKey]);
                 return (has50Pct ? s50 : true) && (has100Pct ? s100 : true);
             }
+            // ✅ v3.26 4-tab 过滤 (基于 liteQuote.unsettled / settled50 / settled100)
+            //   GAS 端 getUserSettlements 已经基于 Pct snapshot 算好了
             let filteredQuotes = data.quotes;
-            if (_currentCommTab === 'settled') {
-                filteredQuotes = data.quotes.filter(function(q) { return _isFullySettledForCurrentUser(q) === true; });
-            } else if (_currentCommTab === 'unsettled') {
-                filteredQuotes = data.quotes.filter(function(q) { return _isFullySettledForCurrentUser(q) === false; });
+            if (_currentCommTab === 'unsettled') {
+                filteredQuotes = data.quotes.filter(function(q) { return q.unsettled === true; });
+            } else if (_currentCommTab === 'settled50') {
+                filteredQuotes = data.quotes.filter(function(q) { return q.settled50 === true; });
+            } else if (_currentCommTab === 'settled100') {
+                filteredQuotes = data.quotes.filter(function(q) { return q.settled100 === true; });
             }
+            // 'all' tab 不过滤, 全部显示
 
             const projectCommMap = {}; // 按项目合并
             const displayName = currentCommUser;
@@ -2486,8 +2495,9 @@
 
                 if (matchedRoles.length > 0) {
                     const projNo = quote.projNo;
-                    const settled50 = quote.settled50 && quote.settled50[commSettlementKey] ? true : false;
-                    const settled100 = quote.settled100 && quote.settled100[commSettlementKey] ? true : false;
+                    // ✅ v3.26: settled50/100 来自 liteQuote 字段 (commission_settlement.json)
+                    const settled50 = !!quote.settled50;
+                    const settled100 = !!quote.settled100;
 
                     if (!projectCommMap[projNo]) {
                         const totalDeduct = quote.totalDeductAmount || 0;
@@ -2659,32 +2669,11 @@
                 html += '</td>';
                 // ✅ 2026-08-22：所有 tab 都有"标记时间"列（不同 tab 显示内容不同）
                 if (_currentCommTab === 'unsettled') {
-                    // 未结算 tab：只显示该用户上次发 50% 的时间（如果有），避免重复算
-                    //   这种情况：项目整体没发 50%，但其他用户可能发过 → 显示 "其他用户 [date] 已发 50%"
-                    //   或者本用户之前发过又 unmark 过 → 显示 "上次 [date] 发 50%（已撤回）"
+                    // ✅ v3.26: 不再用 d.quote.settled50 展示其他用户, 简化显示
                     html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;line-height:1.4;">';
-                    let lastUserMark = '';
-                    if (d.quote && d.quote.settled50) {
-                        // 检查本用户发过没
-                        if (d.quote.settled50[commSettlementKey]) {
-                            lastUserMark = d.quote.settled50[commSettlementKey];
-                            html += '<div style="color:#28a745;font-size:11px;font-weight:600;">' + (lang?'已发 50%':'Settled 50%') + '</div>';
-                            html += '<div style="color:#666;font-size:11px;">' + formatDateTime(lastUserMark) + '</div>';
-                        } else {
-                            // 其他用户发过 50%
-                            const otherUsers = Object.keys(d.quote.settled50).filter(function(u) { return u !== commSettlementKey; });
-                            if (otherUsers.length > 0) {
-                                const lastOther = otherUsers.map(function(u) { return d.quote.settled50[u]; }).sort().pop();
-                                const lastOtherUser = otherUsers.sort(function(a, b) {
-                                    return d.quote.settled50[a] > d.quote.settled50[b] ? -1 : 1;
-                                })[0];
-                                html += '<div style="color:#fd7e14;font-size:11px;font-weight:600;">' + (lang?'其他用户已发':'Other user settled') + '</div>';
-                                html += '<div style="color:#666;font-size:11px;">' + formatDateTime(lastOther) + '</div>';
-                                html += '<div style="color:#999;font-size:10px;">by ' + escapeHtml(lastOtherUser) + '</div>';
-                            } else {
-                                html += '<span style="color:#999;font-size:11px;">-</span>';
-                            }
-                        }
+                    if (d.settlement && d.settlement.settled50At) {
+                        html += '<div style="color:#28a745;font-size:11px;font-weight:600;">' + (lang?'之前发过 50%':'Previously settled 50%') + '</div>';
+                        html += '<div style="color:#666;font-size:11px;">' + formatDateTime(d.settlement.settled50At) + '</div>';
                     } else {
                         html += '<span style="color:#999;font-size:11px;">-</span>';
                     }
@@ -2692,34 +2681,21 @@
                     html += '<button onclick="showCommHistory(' + idx + ')" style="margin-top:4px;padding:2px 6px;background:#fff;border:1px solid #00B3B8;color:#00B3B8;border-radius:3px;cursor:pointer;font-size:10px;">' + (lang?'查看历史':'History') + '</button>';
                     html += '</td>';
                 } else {
-                    // ✅ 2026-08-08 批 3：已结算/全部 tab 加"标记时间"列 + "查看历史"按钮
+                    // ✅ v3.26: 已结算/全部 tab 标记时间, 从 d.settlement 读
                     html += '<td style="padding:8px;border:1px solid #ddd;font-size:12px;line-height:1.4;min-width:160px;">';
-                    // 找本用户（commSettlementKey）的最后 mark50/mark100/unmark 时间
-                    let lastMarkTime = '';
-                    let lastMarkBy = '';
-                    let lastMarkAction = '';
-                    if (d.quote && d.quote.commSettleHistory && d.quote.commSettleHistory.length > 0) {
-                        const userMarks = d.quote.commSettleHistory.filter(function(h) {
-                            return h.action === 'mark50' || h.action === 'mark100' || h.action === 'unmark50' || h.action === 'unmark100';
-                        });
-                        if (userMarks.length > 0) {
-                            const last = userMarks[userMarks.length - 1];
-                            lastMarkTime = formatDateTime(last.at);
-                            lastMarkBy = last.by || '?';
-                            lastMarkAction = last.action;
+                    if (d.settlement && (d.settlement.settled50At || d.settlement.settled100At)) {
+                        if (d.settlement.settled100At) {
+                            html += '<div style="color:#28a745;font-weight:600;font-size:11px;">' + (lang?'100% 已发':'100% Settled') + '</div>';
+                            html += '<div style="color:#666;font-size:11px;">' + formatDateTime(d.settlement.settled100At) + '</div>';
+                        } else if (d.settlement.settled50At) {
+                            html += '<div style="color:#17a2b8;font-weight:600;font-size:11px;">' + (lang?'50% 已发':'50% Settled') + '</div>';
+                            html += '<div style="color:#666;font-size:11px;">' + formatDateTime(d.settlement.settled50At) + '</div>';
                         }
-                    }
-                    if (lastMarkTime) {
-                        const isUnmark = lastMarkAction.indexOf('unmark') === 0;
-                        const bg = isUnmark ? '#dc3545' : '#28a745';
-                        let label = '';
-                        if (lastMarkAction === 'mark50') label = (lang?'50% 已发':'50% Settled');
-                        else if (lastMarkAction === 'mark100') label = (lang?'100% 已发':'100% Settled');
-                        else if (lastMarkAction === 'unmark50') label = (lang?'取消 50%':'Unmark 50%');
-                        else label = (lang?'取消 100%':'Unmark 100%');
-                        html += '<div style="color:' + bg + ';font-weight:600;font-size:11px;">' + label + '</div>';
-                        html += '<div style="color:#666;font-size:11px;">' + lastMarkTime + '</div>';
-                        html += '<div style="color:#999;font-size:10px;">by ' + escapeHtml(lastMarkBy) + '</div>';
+                        if (d.settlement.settled50By && d.settlement.settled50By !== 'migrated') {
+                            html += '<div style="color:#999;font-size:10px;">by ' + escapeHtml(d.settlement.settled50By) + '</div>';
+                        } else if (d.settlement.settled50By === 'migrated') {
+                            html += '<div style="color:#999;font-size:10px;">(migrated)</div>';
+                        }
                     } else {
                         html += '<span style="color:#999;font-size:11px;">-</span>';
                     }
@@ -2811,7 +2787,15 @@
             if (!d) return;
             document.getElementById('commHistoryProjNo').textContent = d.projNo || '';
             const content = document.getElementById('commHistoryContent');
-            const history = (d.quote && d.quote.commSettleHistory) ? d.quote.commSettleHistory : [];
+            // ✅ v3.26: history 从 d.settlement 构造 (commission_settlement.json)
+            const settlement = d.settlement || {};
+            const history = [];
+            if (settlement.settled50At) {
+                history.push({ at: settlement.settled50At, by: settlement.settled50By, action: 'mark50', note: 'Pct: ' + settlement.settled50Pct });
+            }
+            if (settlement.settled100At) {
+                history.push({ at: settlement.settled100At, by: settlement.settled100By, action: 'mark100', note: 'Pct: ' + settlement.settled100Pct });
+            }
             if (history.length === 0) {
                 content.innerHTML = '<p style="text-align:center;color:#999;padding:30px;">' + (lang?'暂无历史记录':'No history yet') + '</p>';
             } else {
@@ -2920,13 +2904,13 @@
             }
 
             // 业务规则 (2026-06-16)：未标"50%已结算"前不能标"100%已结算"
-            // 修复：用 settled50[commSettlementKey]（按用户），不是 commission50SavedAt
+            // ✅ v3.26: 用 d.settled50 (来自 commission_settlement.json, 不再用 d.quote.settled50)
             if (type === 100) {
                 const violators = [];
                 checkedBoxes.forEach(cb => {
                     const idx = parseInt(cb.dataset.idx);
                     const d = commSettlementFilteredData[idx];
-                    if (d && d.quote && !(d.quote.settled50 && d.quote.settled50[commSettlementKey])) {
+                    if (d && !d.settled50) {
                         violators.push(d.projNo);
                     }
                 });
@@ -2936,16 +2920,16 @@
                 }
             }
 
-            // ✅ 2026-08-22 防重保护：统计已发过工资的（避免重复标记 + 时间戳覆盖）
+            // ✅ v3.26 防重保护：基于 d.settled50/100 (liteQuote 字段, 来自 commission_settlement.json)
             const alreadySettled = [];
             checkedBoxes.forEach(cb => {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
-                if (!d || !d.quote) return;
-                if (type === 50 && d.quote.settled50 && d.quote.settled50[commSettlementKey]) {
+                if (!d) return;
+                if (type === 50 && d.settled50) {
                     alreadySettled.push(d.projNo);
                 }
-                if (type === 100 && d.quote.settled100 && d.quote.settled100[commSettlementKey]) {
+                if (type === 100 && d.settled100) {
                     alreadySettled.push(d.projNo);
                 }
             });
@@ -2970,45 +2954,29 @@
             for (const cb of checkedBoxes) {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
-                if (!d || !d.quote) continue;
+                if (!d) continue;
 
-                // ✅ 2026-08-22 防重保护（再检查一次）：如果已发过，跳过
-                if (type === 50 && d.quote.settled50 && d.quote.settled50[commSettlementKey]) {
+                // ✅ v3.26 防重保护（再检查一次）：如果已发过，跳过
+                if (type === 50 && d.settled50) {
                     cb.disabled = true;
                     skippedCount++;
                     continue;
                 }
-                if (type === 100 && d.quote.settled100 && d.quote.settled100[commSettlementKey]) {
+                if (type === 100 && d.settled100) {
                     cb.disabled = true;
                     skippedCount++;
                     continue;
                 }
 
                 try {
-                    const projNo = d.quote.projNo;
-                    // ✅ 批 2.2：标记成功失效缓存（避免显示旧 settled 状态）
-                    // 注意：这里 invalidate 会在下面 result.success 时再调一次，确保只成功后才失效
-                    // ✅ 2026-08-07 改：用 quote.createdBy 优先于 commSettlementKey
-                    // 原因：admin 在 FSD 账号下打开了 JSD01（被错位写入 FSD 目录），如果用 commSettlementKey='FSD'
-                    //   写盘，会把 JSD01 写到 FSD 目录（污染扩散）。用 quote.createdBy='JSD' 写到正确目录
-                    // fallback 顺序：createdBy（原始归属）→ commSettlementKey（当前结算 user）→ currentCommUser
-                    const realOwner = d.quote.createdBy || commSettlementKey || currentCommUser || '';
-                    // 修复 (2026-06-16)：写 settled50/settled100[username] = true（按用户的发工资标志）
-                    // 而不是写 commission50SavedAt/100SavedAt（那个是 Quote Details 保存佣金 % 的时间戳，不应联动）
-                    // GAS 端 saveQuote v3.1 patched 已支持 Object.assign 写任意字段
-                    const updatedQuote = JSON.parse(JSON.stringify(d.quote));
-                    if (type === 50) {
-                        if (!updatedQuote.settled50) updatedQuote.settled50 = {};
-                        updatedQuote.settled50[commSettlementKey] = new Date().toISOString();
-                    } else {
-                        if (!updatedQuote.settled100) updatedQuote.settled100 = {};
-                        updatedQuote.settled100[commSettlementKey] = new Date().toISOString();
-                    }
+                    const projNo = d.projNo;
+                    // ✅ v3.26: 调 markSettled action, 写 commission_settlement.json, 不动 quote
                     const postData = new URLSearchParams();
-                    postData.append('action', 'saveQuote');
-                    postData.append('username', realOwner);
+                    postData.append('action', 'markSettled');
+                    postData.append('username', commSettlementKey);
                     postData.append('projNo', projNo);
-                    postData.append('quoteData', JSON.stringify(updatedQuote));
+                    postData.append('type', type);
+                    postData.append('settledBy', 'admin');
 
                     const response = await fetch(GAS_URL, {
                         method: 'POST',
@@ -3018,20 +2986,25 @@
                     const result = await response.json();
 
                     if (result.success) {
-                        // ✅ 批 2.2：标记成功失效缓存（避免下次还看到未结算）
+                        // 标记成功失效缓存（避免下次还看到旧状态）
                         invalidateCommCache(commSettlementKey);
                         // 更新前端缓存的项目状态
                         if (type === 50) {
-                            d.quote.settled50 = updatedQuote.settled50;
                             d.settled50 = true;
+                            if (!d.settlement) d.settlement = {};
+                            d.settlement.settled50At = result.settlement.settled50At;
+                            d.settlement.settled50Pct = result.settledPct;
                         } else {
-                            d.quote.settled100 = updatedQuote.settled100;
                             d.settled100 = true;
+                            if (!d.settlement) d.settlement = {};
+                            d.settlement.settled100At = result.settlement.settled100At;
+                            d.settlement.settled100Pct = result.settledPct;
                         }
                         cb.disabled = true;
                         successCount++;
                     } else {
-                        console.error('Save failed:', result);
+                        console.error('Mark failed:', result);
+                        alert((lang?'标记失败：':'Mark failed: ') + (result.message || ''));
                         errorCount++;
                     }
                 } catch (e) {
@@ -3148,9 +3121,9 @@
             checkedBoxes.forEach(cb => {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
-                if (!d || !d.quote) return;
-
-                const q = d.quote;
+                if (!d) return;
+                // ✅ v3.26: d 本身就是 liteQuote, 不再有 d.quote
+                const q = d;
                 const paid50 = d.paidAmount50 || 0;
                 const paid100 = d.paidAmount100 || 0;
                 const isSettled50 = !!d.settled50;  // 已标"50%已结算"
