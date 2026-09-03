@@ -3130,16 +3130,8 @@
                 const isSettled100 = !!d.settled100; // 已标"100%已结算"
 
                 // 5个角色列的值（50%列 + 100%列）
-                // 逻辑：settled50=true → 50%列=0；settled100=true → 100%列=0
-                // d.roles 已包含 per-role 佣金和扣除，直接按role标签匹配
-                // role标签中文映射：销售员/副销售员/测量员/设计师/总负责人
-                const roleLabelMap = {
-                    'salesperson': '销售员',
-                    'subSalesperson': '副销售员',
-                    'measurementEngineer': '测量员',
-                    'designerName': '设计师',
-                    'generalManagerName': '总负责人'
-                };
+                // ✅ v3.26 fix: 直接用 q 字段重算, 不依赖 d.roles (避免 d.roles 缺失/匹配失败)
+                //   settled50=true → 50%列=0；settled100=true → 100%列=0
                 const roleCol50 = [];  // 5个角色的50%列值
                 const roleCol100 = []; // 5个角色的100%列值
                 roleKeys.forEach(rk => {
@@ -3149,12 +3141,11 @@
                         roleCol100.push(0);
                         return;
                     }
-                    // 通过中文标签从d.roles中找对应角色数据
-                    const roleLabel = roleLabelMap[rk.userField];
-                    const roleData = roleLabel && d.roles ? d.roles.find(function(r) { return r.role === roleLabel; }) : null;
-                    // settled50=true → 50%列=0；settled100=true → 100%列=0
-                    const v50 = isSettled50 ? 0 : (roleData ? roleData.comm50 : 0);
-                    const v100 = isSettled100 ? 0 : (roleData ? roleData.comm100 : 0);
+                    // ✅ v3.26 fix: 直接从 q 读 Pct 重算, 避免 d.roles.find 失败
+                    const pct50 = Number(q[rk.key]) || 0;
+                    const pct100 = Number(q[rk.pct100Key]) || 0;
+                    const v50 = isSettled50 ? 0 : (paid50 * pct50 / 100);
+                    const v100 = isSettled100 ? 0 : (paid100 * pct100 / 100);
                     roleCol50.push(v50);
                     roleCol100.push(v100);
                 });
