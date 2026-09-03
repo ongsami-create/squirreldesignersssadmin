@@ -3122,8 +3122,8 @@
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
                 if (!d) return;
-                // ✅ v3.26: d 本身就是 liteQuote, 不再有 d.quote
-                const q = d;
+                // ✅ v3.26c: d 是裁剪后的对象 (没保留 Pct 字段), 用 d.quote (完整 v3.26 liteQuote) 读 Pct
+                const q = d.quote || d;
                 const paid50 = d.paidAmount50 || 0;
                 const paid100 = d.paidAmount100 || 0;
                 const isSettled50 = !!d.settled50;  // 已标"50%已结算"
