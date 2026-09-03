@@ -2474,13 +2474,14 @@
                 ];
 
                 // 找出该用户匹配的角色（佣金百分比有值）- 使用displayName匹配
+                // ✅ 2026-09-03 v3.27: 允许 Pct 0 (RM 0.00) 也进 matchedRoles, 这样 0 Pct 项目能在表格里看到
                 const matchedRoles = [];
                 roles.forEach(roleConfig => {
                     const userName = quote[roleConfig.userField] || '';
                     const pct50 = quote[roleConfig.pct50Field] || 0;
                     const pct100 = quote[roleConfig.pct100Field] || 0;
 
-                    if (userName.toUpperCase() === displayName.toUpperCase() && (pct50 > 0 || pct100 > 0)) {
+                    if (userName.toUpperCase() === displayName.toUpperCase()) {
                         const comm50 = paidAmount50 * pct50 / 100;
                         const comm100 = paidAmount100 * pct100 / 100;
                         matchedRoles.push({
@@ -2665,6 +2666,13 @@
                     html += '<span style="background:#17a2b8;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">100%</span>';
                 } else {
                     html += '<span style="background:#6c757d;color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;">-</span>';
+                }
+                // ✅ v3.27: 撤回按钮 (按 50% / 100% 独立显示)
+                if (d.settled50) {
+                    html += '<div><button onclick="withdrawCommSettled(50,' + idx + ')" style="margin-top:4px;padding:2px 6px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10px;">↶ ' + (lang?'撤回 50%':'Withdraw 50%') + '</button></div>';
+                }
+                if (d.settled100) {
+                    html += '<div><button onclick="withdrawCommSettled(100,' + idx + ')" style="margin-top:4px;padding:2px 6px;background:#dc3545;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10px;">↶ ' + (lang?'撤回 100%':'Withdraw 100%') + '</button></div>';
                 }
                 html += '</td>';
                 // ✅ 2026-08-22：所有 tab 都有"标记时间"列（不同 tab 显示内容不同）
@@ -3046,6 +3054,44 @@
             return '"' + String(str || '').replace(/"/g, '""') + '"';
         }
 
+        // ✅ v3.27: 撤回已结算标记 (从 commission_settlement.json 清掉 settled50/100)
+        async function withdrawCommSettled(type, idx) {
+            const lang = currentLang === 'zh';
+            const d = commSettlementFilteredData[idx];
+            if (!d || !d.projNo) {
+                showToast(lang?'找不到项目':'Project not found', 'error');
+                return;
+            }
+            const settleLabel = type === 50 ? '50%' : '100%';
+            if (!confirm(lang?`确定要撤回 ${d.projNo} 的 ${type}% 已结算标记吗？\n\n（不会修改 Quote Details 任何数据）`:`Confirm to withdraw ${type}% settled for ${d.projNo}?\n\n(Quote Details data will NOT be modified)`)) {
+                return;
+            }
+            try {
+                const postData = new URLSearchParams();
+                postData.append('action', 'withdrawSettled');
+                postData.append('username', commSettlementKey);
+                postData.append('projNo', d.projNo);
+                postData.append('type', type);
+                const response = await fetch(GAS_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: postData
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast((lang?'已撤回 '+settleLabel+' 标记：':'Withdrew '+settleLabel+' mark: ') + d.projNo, 'success');
+                    // 失效缓存 + 重新拉数据
+                    invalidateCommCache(commSettlementKey);
+                    await reloadCommSettlementData();
+                } else {
+                    showToast((lang?'撤回失败：':'Withdraw failed: ') + (result.message || ''), 'error');
+                }
+            } catch (e) {
+                console.error('withdrawCommSettled error:', e);
+                showToast((lang?'撤回失败：':'Withdraw failed: ') + e.message, 'error');
+            }
+        }
+
         // ✅ 2026-08-08 优化：导出 Excel 弹窗（批 1C）
         // 选项 A：标记已结算 + 上传云端 + 保存本地
         // 选项 B：只保存到本地不标记
@@ -3062,40 +3108,23 @@
                 }
                 return;
             }
-            // ✅ 弹窗：让用户选 A 还是 B
+            // ✅ v3.27 弹窗：上传云端 vs 保存本地 (两个都不自动 mark, 手动用底部按钮 mark)
             const totalSelected = checkedBoxes.length;
-            // 计算已结算的数量（被 disable 的 checkbox）
             const settledCount = document.querySelectorAll('.comm-cb:disabled').length;
             const confirmMsg = lang
-                ? `已选择 ${totalSelected} 个项目（已结算 ${settledCount} 个被排除）。\n\n请选择导出方式：\n\n【确定】= 标记已结算 + 上传云端 + 保存本地\n【取消】= 只保存到本地不标记已结算`
-                : `${totalSelected} projects selected (${settledCount} settled excluded). Choose export method:\n\n[OK] = Mark settled + Upload cloud + Save local\n[Cancel] = Save local only (don't mark settled)`;
-            const markAndExport = confirm(confirmMsg);
-            // 用户确认：执行实际导出（先标记 settle，再 export）
-            await _doExportCommCsv(checkedBoxes, markAndExport);
+                ? `已选择 ${totalSelected} 个项目（已结算 ${settledCount} 个被排除）。\n\n请选择导出方式：\n\n【确定】= 上传云端 + 保存本地（不自动标记）\n【取消】= 只保存本地，不上传云端\n\n提示：标记"已发工资"请用底部按钮手动操作`
+                : `${totalSelected} projects selected (${settledCount} settled excluded).\n\n[OK] = Upload to cloud + Save local (no auto-mark)\n[Cancel] = Save local only\n\nTip: Use bottom buttons to mark "settled" manually`;
+            const uploadToCloud = confirm(confirmMsg);
+            // 用户确认：执行实际导出
+            await _doExportCommCsv(checkedBoxes, uploadToCloud);
         }
 
-        // 实际执行 CSV 导出（带/不带 mark settled）
-        async function _doExportCommCsv(checkedBoxes, markAndExport) {
+        // 实际执行 CSV 导出（v3.27: 不再自动 mark, 只导出）
+        async function _doExportCommCsv(checkedBoxes, uploadToCloud) {
             const lang = currentLang === 'zh';
 
-            // ✅ 选项 A：先标记已结算（用 markCommSettled 内部逻辑，避免重复代码）
-            if (markAndExport) {
-                for (const cb of checkedBoxes) {
-                    cb.disabled = true;
-                }
-                // 调用 markCommSettled(50) 走完整流程（包含 mark settled 写盘 + 触发 badge 更新）
-                await markCommSettled(50);
-                // 重新拉取数据（因为状态变了，但 commSettlementFilteredData 还是旧的）
-                await reloadCommSettlementData();
-                // 重新选 checkbox（reload 后旧 cb 不在了）
-                // ⚠️ 简单做法：export 用 cb.dataset.idx 拿数据，idx 在 reload 后可能失效
-                //   改用 projNo 重新找
-                checkedBoxes = Array.from(document.querySelectorAll('.comm-cb:checked:not(:disabled)'));
-                if (checkedBoxes.length === 0) {
-                    showToast(lang?'没有可导出的项目（已全部标记）':'No projects to export (all marked)', 'warning');
-                    return;
-                }
-            }
+            // ✅ v3.27: 删除 markAndExport 流程, 直接 export
+            // (mark 改用底部手动按钮)
 
             const today = new Date().toISOString().slice(0, 10);
             const displayName = currentCommUser || 'user';
@@ -3198,11 +3227,11 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // ✅ 2026-08-08 优化：根据选项 A/B 显示不同 toast
-                    if (markAndExport) {
-                        showToast((lang?'✓ 已标记 '+checkedBoxes.length+' 个 + 导出（本地+云端）：':'✓ Marked '+checkedBoxes.length+' settled + Exported (local+cloud): ') + filename, 'success');
+                    // ✅ v3.27: 根据上传云端 vs 本地显示不同 toast
+                    if (uploadToCloud) {
+                        showToast((lang?'✓ 已上传云端 + 保存本地：':'✓ Uploaded to cloud + Saved local: ') + filename, 'success');
                     } else {
-                        showToast((lang?'已导出（本地+云端，未标记）：':'Exported (local+cloud, not marked): ') + filename, 'success');
+                        showToast((lang?'已保存本地（未上传云端）：':'Saved local only (not uploaded to cloud): ') + filename, 'success');
                     }
                 } else {
                     showToast((lang?'本地已下载，云端失败：':'Local saved, cloud failed: ') + (result.message || 'Unknown'), 'error');
