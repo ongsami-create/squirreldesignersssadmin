@@ -2543,8 +2543,10 @@
                             settled100: settled100,
                             project50Saved: !!quote.commission50SavedAt,
                             project100Saved: !!quote.commission100SavedAt,
-                            paidAmount50: _pool.amount50,
-                            paidAmount100: _pool.amount100,
+                            // ✅ 2026-09-02 v3.24b: 用 line 2455-2456 算好的 paidAmount50/100
+                            //   (不要用 _pool, _pool 已在 v3.24 删除, 否则 ReferenceError 中断 forEach)
+                            paidAmount50: paidAmount50,
+                            paidAmount100: paidAmount100,
                             roles: rolesWithDeduct,
                             quote: quote,
                             deductSharedRoles: deductSharedRoles,
