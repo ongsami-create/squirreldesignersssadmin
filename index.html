@@ -2450,17 +2450,22 @@
                 }
                 if (quote.discount) grandTotal -= quote.discount;
 
-                // ✅ 2026-09-04 v3.27b: 统一用 paidAmount50 + paidAmount100 算 paidAmount
-                //   跟佣金计算口径一致 (排除 paidAmount 字段差异, depositRecords 累加差异)
-                const paidAmount = (Number(quote.paidAmount50) || 0) + (Number(quote.paidAmount100) || 0);
+                // ✅ 2026-09-04 v3.28: 用 splitDepositToPools(quote.depositRecords) 算 paidAmount50/100
+                //   (Squirrel Designer 端不写 paidAmount50/100 字段, 永远 0; depositRecords 才是真相)
+                //   跟弹窗 line 3856 poolState 同一口径, 确保表格 debt% = 弹窗显示
+                //   Fallback: 老 GAS (v3.27-) liteQuote 没返 depositRecords, 用 paidAmount50/100 字段
+                let paidAmount50, paidAmount100;
+                if (quote.depositRecords !== undefined) {
+                    const poolSplit = splitDepositToPools(quote);
+                    paidAmount50 = poolSplit.amount50;
+                    paidAmount100 = poolSplit.amount100;
+                } else {
+                    paidAmount50 = Number(quote.paidAmount50) || 0;
+                    paidAmount100 = Number(quote.paidAmount100) || 0;
+                }
+                const paidAmount = paidAmount50 + paidAmount100;
                 const debt = grandTotal - paidAmount;
                 const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
-
-                // ✅ 2026-09-02 v3.24: 直接用索引里的 paidAmount50/100 字段
-                //   之前用 splitDepositToPools(quote.depositRecords) 但 v3.23 索引没存 depositRecords
-                //   改用 quote.paidAmount50 / paidAmount100 (索引里已有, 跟 Quote Details 数值一致)
-                const paidAmount50 = Number(quote.paidAmount50) || 0;
-                const paidAmount100 = Number(quote.paidAmount100) || 0;
 
                 // 角色列表（使用扁平字段结构，与保存时一致）
                 const roles = [
