@@ -2450,11 +2450,9 @@
                 }
                 if (quote.discount) grandTotal -= quote.discount;
 
-                // 计算已付金额和欠款%
-                let paidAmount = quote.paidAmount || 0;
-                if (quote.depositRecords && quote.depositRecords.length > 0) {
-                    paidAmount = quote.depositRecords.reduce((sum, dep) => sum + (dep.amount || 0), 0);
-                }
+                // ✅ 2026-09-04 v3.27b: 统一用 paidAmount50 + paidAmount100 算 paidAmount
+                //   跟佣金计算口径一致 (排除 paidAmount 字段差异, depositRecords 累加差异)
+                const paidAmount = (Number(quote.paidAmount50) || 0) + (Number(quote.paidAmount100) || 0);
                 const debt = grandTotal - paidAmount;
                 const debtPercent = grandTotal > 0 ? ((debt / grandTotal) * 100).toFixed(1) : 0;
 
