@@ -3786,13 +3786,26 @@ function renderDetailQuoteList(quotes) {
                 const result = await response.json();
                 if (result.success) {
                     showToast(currentLang === 'zh' ? '已标记为「已完成」' : 'Marked as completed', 'success');
-                    // 清除 cache 并刷新当前用户数据（list 里的 status 会更新成「已完成」）
+                    // ✅ 2026-09-15 v3.29: 不再重 openQuoteDetail (又一次 getQuoteDetail fetch)
+                    //   直接前端更新 currentQuoteDetail.status + renderQuoteDetailModal
+                    //   节省 1 次 GAS 调用 (~5-25s 冷启动延迟)
+                    if (window.currentQuoteDetail) {
+                        window.currentQuoteDetail.status = 'completed';
+                        if (result.completedAt) window.currentQuoteDetail.completedAt = result.completedAt;
+                        if (result.completedBy) window.currentQuoteDetail.completedBy = result.completedBy;
+                        renderQuoteDetailModal(window.currentQuoteDetail);
+                    }
+                    if (btn) {
+                        btn.textContent = currentLang === 'zh' ? '已完成 ✓' : 'Completed ✓';
+                        btn.disabled = true;
+                        btn.style.opacity = '0.5';
+                        btn.style.cursor = 'not-allowed';
+                    }
+                    // fire-and-forget 刷 list (不阻塞 UI, 异步跑)
                     if (currentEditingUser && currentEditingUser.username) {
                         delete dataCache.userStats[currentEditingUser.username];
-                        await fetchUserData(currentEditingUser.username);
+                        fetchUserData(currentEditingUser.username);
                     }
-                    // 重新打开 detail modal 用新状态
-                    openQuoteDetail(projNo);
                 } else {
                     showToast(result.message || 'Failed', 'error');
                     if (btn) {
@@ -4457,11 +4470,11 @@ function renderDetailQuoteList(quotes) {
             if (document.getElementById('deduct_role_personInCharge')?.checked) deductSharedRoles.push('personInCharge');
 
             try {
-                const response = await fetch(GAS_URL + '?action=getQuoteDetail&projNo=' + encodeURIComponent(projNo));
-                const data = await response.json();
-
-                if (data.success && data.quote) {
-                    const quote = data.quote;
+                // ✅ 2026-09-15 v3.29: 复用 line 4370-4376 已 fetch 的 quoteForPool, 不再二次 getQuoteDetail
+                //   (createdBy 永不变, 一次 fetch 拿全 quote + depositRecords + createdBy)
+                //   节省 1 次 GAS 调用 (~5-25s 冷启动延迟)
+                if (quoteForPool) {
+                    const quote = quoteForPool;
                     const ownerUsername = quote.createdBy || sessionStorage.getItem('adminUsername') || '';
 
                     // 只发送佣金相关字段，大幅减少数据量
