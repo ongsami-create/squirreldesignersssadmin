@@ -3851,10 +3851,12 @@ function renderDetailQuoteList(quotes) {
                     quote.generalManagerCommissionPct50
                 );
                 if (has50CommissionSaved) {
-                    // 旧数据视为已结清：用 depositRecords 全部分给 50
-                    const records = quote.depositRecords || [];
-                    const temp50 = records.reduce((s, r) => s + (Number(r && r.amount) || 0), 0);
-                    const temp100 = Number(quote.paidAmount100) || 0;
+                    // ✅ 2026-10-07 v3.29: 旧数据也按 pool 字段分池 (之前无视 pool 全加总给 50 池)
+                    //   bug: PSD38 的 13950 在 100 池, 但这个分支把它算进 50 池 → canInput100 永远 false
+                    //   现在用 splitDepositToPools 跟主分支同一口径 (pool==='100' → 100 池)
+                    const _poolSplit = splitDepositToPools(quote);
+                    const temp50 = _poolSplit.amount50;
+                    const temp100 = _poolSplit.amount100;
                     const pct50OfTotal = grandTotal > 0 ? (temp50 / grandTotal) * 100 : 0;
                     poolState = {
                         canInput50: false,
