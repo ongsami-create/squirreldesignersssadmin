@@ -1825,7 +1825,54 @@
         document.addEventListener('DOMContentLoaded', function() {
             checkLoginStatus();
             setupLoginForm();
+            // ✅ 2026-10-08 v3.30 性能：GAS 实例预热（解决第一次打开慢 10-25s）
+            startGasWarmup();
         });
+
+        // ✅ 2026-10-08 v3.30 性能：GAS 实例预热
+        // 原理：GAS 冷启动要 10-25s（实例被回收后首次调用）。只要 4 分钟内有一次
+        //   调用，实例就在跑，后续所有 action 都快（~100ms-1s）。
+        //   所以：页面加载后先打一次 ping，之后每 4 分钟 idle 打一次。
+        // 为什么用 requestIdleCallback：不影响用户操作，且 GAS ping 是纯常量返回（~50ms）
+        // 为什么间隔 4 分钟：实测 GAS 实例闲置约 5 分钟后回收，4 分钟留安全余量
+        // 为什么不本地存储时间戳：多标签页会重复打，GAS ping 很轻不值得优化这点复杂度
+        const GAS_WARMUP_INTERVAL_MS = 4 * 60 * 1000;   // 4 分钟
+        let _gasWarmupTimer = null;
+
+        function _scheduleGasWarmup() {
+            if (_gasWarmupTimer) clearTimeout(_gasWarmupTimer);
+            _gasWarmupTimer = setTimeout(function() {
+                _pingGas();
+                _scheduleGasWarmup();   // 递归排下一次
+            }, GAS_WARMUP_INTERVAL_MS);
+        }
+
+        function _pingGas() {
+            // 用 keepalive + 极小超时：ping 失败也不能影响页面
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timer = ctrl ? setTimeout(function() { ctrl.abort(); }, 8000) : null;
+            try {
+                return fetch(GAS_URL + '?action=ping', ctrl ? { signal: ctrl.signal } : undefined)
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .catch(function() { return null; })   // 静默失败：预热是尽力而为
+                    .finally(function() { if (timer) clearTimeout(timer); });
+            } catch (e) {
+                if (timer) clearTimeout(timer);
+                return Promise.resolve(null);
+            }
+        }
+
+        function startGasWarmup() {
+            // 立即打第一次（用户可能马上要点刷新）
+            _pingGas();
+            _scheduleGasWarmup();
+
+            // 页面切到后台时继续保活（业务员常挂着页面不关）
+            // ⚠️ 现代浏览器会节流后台定时器（最短 1 分钟），4 分钟间隔仍能跑
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) _pingGas();   // 回到前台立刻打一次
+            });
+        }
 
         // Check login status
         function checkLoginStatus() {
