@@ -3360,10 +3360,11 @@
                 if (data.success) {
                     showToast(translations[currentLang].deleteSuccess, 'success');
                     closeEditUserModal();
-                    // 清除该用户的缓存
+                    // 清除该用户的缓存（内存 + localStorage，v3.31）
                     if (dataCache.userStats[currentEditingUser.username]) {
                         delete dataCache.userStats[currentEditingUser.username];
                     }
+                    _lsClearUserStats(currentEditingUser.username);
                     loadUsers();
                 } else {
                     showToast(data.message || 'Failed to delete user', 'error');
@@ -3422,6 +3423,77 @@
         }
 
         // 后台异步刷新用户数据（不影响UI）
+        // ✅ 2026-10-08 v3.31 性能：localStorage 持久缓存（第三层 fallback）
+        // 架构：
+        //   第1层 内存 dataCache.userStats（最快，关页面就没）
+        //   第2层 GAS + GAS 自己的 CacheService（120s）
+        //   第3层 localStorage（本层，跨会话，断网可用）
+        // 目标：GAS 挂掉 / 冷启动超时 / IP 限速时，页面依然能显示上次的数据
+        //
+        // 设计取舍（为什么不做得更复杂）：
+        //   - 只缓存只读数据（statistics/quotes），不缓存 activities（变动频繁，收益低）
+        //   - 只在 GAS 成功时写，绝不用陈旧数据覆盖 GAS 数据（强一致性优先）
+        //   - 读出来永远先渲染（秒开），再用 GAS 数据异步覆盖（最终一致）
+        //   - 保存失败（隐私模式/超配额）静默降级，不影响主流程
+        const LS_PREFIX = 'squirrel_userStats_';
+        const LS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;   // 7 天后不用（防陈旧数据误导）
+
+        function _lsSaveUserStats(username, payload) {
+            try {
+                const envelope = {
+                    savedAt: Date.now(),
+                    statistics: payload.statistics,
+                    quotes: payload.quotes
+                };
+                localStorage.setItem(LS_PREFIX + username, JSON.stringify(envelope));
+            } catch (e) {
+                // QuotaExceededError / 隐私模式：静默降级（内存缓存仍然有效）
+                console.warn('[v3.31] localStorage save failed:', e && e.name);
+            }
+        }
+
+        function _lsLoadUserStats(username) {
+            try {
+                const raw = localStorage.getItem(LS_PREFIX + username);
+                if (!raw) return null;
+                const envelope = JSON.parse(raw);
+                if (!envelope || !envelope.statistics) return null;
+                // 超龄数据：删掉但返回 null（宁可空白也不给可能过期的账目）
+                if (Date.now() - (envelope.savedAt || 0) > LS_MAX_AGE_MS) {
+                    localStorage.removeItem(LS_PREFIX + username);
+                    return null;
+                }
+                return {
+                    statistics: envelope.statistics,
+                    quotes: envelope.quotes || [],
+                    ageMs: Date.now() - envelope.savedAt
+                };
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _lsClearUserStats(username) {
+            try { localStorage.removeItem(LS_PREFIX + username); } catch (e) {}
+        }
+
+        // 预热 localStorage：登录后静默把上次的数据填进内存缓存（下次点用户立刻秒开）
+        function _lsHydrateIntoMemory(username) {
+            const stored = _lsLoadUserStats(username);
+            if (stored && !dataCache.userStats[username]) {
+                dataCache.userStats[username] = {
+                    statistics: stored.statistics,
+                    quotes: stored.quotes,
+                    activities: [],       // activities 不缓存
+                    _fromLocalStorage: true,
+                    _ageMs: stored.ageMs
+                };
+                return true;
+            }
+            return false;
+        }
+
+        // 后台异步刷新用户数据（不影响UI）
         async function fetchUserDataInBackground(username) {
             try {
                 const [statsResponse, activityResponse] = await Promise.all([
@@ -3438,6 +3510,13 @@
                     quotes: statsData.quotes || [],  // 保留全量给 list 渲染时再 filter
                     activities: activityData.activities || []
                 };
+                // ✅ 2026-10-08 v3.31: 写 localStorage（GAS 成功才写，保强一致）
+                if (statsData.success) {
+                    _lsSaveUserStats(username, {
+                        statistics: dataCache.userStats[username].statistics,
+                        quotes: dataCache.userStats[username].quotes
+                    });
+                }
             } catch (e) {
                 console.error('Background refresh failed:', e);
             }
@@ -3445,6 +3524,22 @@
 
         // 获取用户数据（首次或缓存失效）
         async function fetchUserData(username) {
+            // ✅ 2026-10-08 v3.31 性能：先秒开（localStorage），再异步用 GAS 数据覆盖
+            // 原来：必须等 GAS 返回（10-25s）才渲染，GAS 挂了就一直空着
+            // 现在：立刻显示上次的数据，GAS 结果到了自动刷新
+            const _lsData = _lsLoadUserStats(username);
+            if (_lsData && !dataCache.userStats[username]) {
+                const _ageMin = Math.round(_lsData.ageMs / 60000);
+                const _staleHint = _ageMin >= 60
+                    ? (currentLang === 'zh' ? '（数据来自 ' + Math.round(_ageMin / 60) + ' 小时前的本地缓存）' : ' (from local cache, ' + Math.round(_ageMin / 60) + 'h ago)')
+                    : '';
+                document.getElementById('detailQuoteCount').textContent = _lsData.statistics.totalQuotes || 0;
+                document.getElementById('detailTotalSales').textContent = 'RM ' + formatNumber(_lsData.statistics.totalSales || 0) + _staleHint;
+                document.getElementById('detailTotalDebt').textContent = 'RM ' + formatNumber(_lsData.statistics.totalDebt || 0);
+                renderDetailQuoteList(_lsData.quotes);
+                console.log('[v3.31] rendered from localStorage, age =', Math.round(_lsData.ageMs / 1000), 's');
+            }
+
             try {
                 // 并行请求统计和活动数据
                 const [statsResponse, activityResponse] = await Promise.all([
@@ -3461,7 +3556,8 @@
                     document.getElementById('detailTotalSales').textContent = 'RM ' + formatNumber(_filteredStats.totalSales || 0);
                     document.getElementById('detailTotalDebt').textContent = 'RM ' + formatNumber(_filteredStats.totalDebt || 0);
                     renderDetailQuoteList(statsData.quotes || []);
-                } else {
+                } else if (!_lsData) {
+                    // ✅ v3.31: 只有"连 localStorage 都没有"才显示空白（原来总是清零）
                     document.getElementById('detailQuoteCount').textContent = '0';
                     document.getElementById('detailTotalSales').textContent = 'RM 0';
                     document.getElementById('detailTotalDebt').textContent = 'RM 0';
@@ -3470,7 +3566,7 @@
 
                 if (activityData.success) {
                     renderDetailActivityLog(activityData.activities || []);
-                } else {
+                } else if (!_lsData) {
                     renderDetailActivityLog([]);
                 }
 
@@ -3481,8 +3577,24 @@
                     quotes: statsData.quotes || [],  // 保留全量给 list 渲染时再 filter
                     activities: activityData.activities || []
                 };
+                // ✅ 2026-10-08 v3.31: GAS 成功才写 localStorage（绝不用陈旧数据覆盖）
+                if (statsData.success) {
+                    _lsSaveUserStats(username, {
+                        statistics: dataCache.userStats[username].statistics,
+                        quotes: dataCache.userStats[username].quotes
+                    });
+                }
             } catch (e) {
                 console.error('Error fetching user data:', e);
+                // ✅ v3.31: GAS 挂掉但有 localStorage → 保留已渲染的数据，只提示
+                if (!_lsData) {
+                    document.getElementById('detailTotalSales').textContent =
+                        (currentLang === 'zh' ? '加载失败，请检查网络' : 'Load failed, check network');
+                } else {
+                    showToast(currentLang === 'zh'
+                        ? '云端连接失败，当前显示本地缓存数据'
+                        : 'Cloud unavailable, showing local cache', 'error');
+                }
             }
         }
 
@@ -3750,9 +3862,10 @@ function renderDetailQuoteList(quotes) {
                 if (result.success) {
                     showToast((currentLang === 'zh' ? '已撤回：' : 'Withdrew: ') + result.message, 'success');
                     closeWithdrawModal();
-                    // 刷新当前用户的数据
+                    // 刷新当前用户的数据（清 localStorage 防陈旧，v3.31）
                     if (currentEditingUser && currentEditingUser.username) {
                         delete dataCache.userStats[currentEditingUser.username];
+                        _lsClearUserStats(currentEditingUser.username);
                         await fetchUserData(currentEditingUser.username);
                     }
                 } else {
@@ -3849,8 +3962,10 @@ function renderDetailQuoteList(quotes) {
                         btn.style.cursor = 'not-allowed';
                     }
                     // fire-and-forget 刷 list (不阻塞 UI, 异步跑)
+                    // ✅ v3.31: 同时清 localStorage，否则弹窗重开后仍显示 completed 前的缓存
                     if (currentEditingUser && currentEditingUser.username) {
                         delete dataCache.userStats[currentEditingUser.username];
+                        _lsClearUserStats(currentEditingUser.username);
                         fetchUserData(currentEditingUser.username);
                     }
                 } else {
@@ -4581,6 +4696,11 @@ deductCommissionPct: deductCommissionPct,
                     if (saveResult.success) {
                         showSaveSuccessModal();
                         showToast(currentLang === 'zh' ? '已保存所有数据' : 'All data saved', 'success');
+                        // ✅ 2026-10-08 v3.31: 清 localStorage（佣金变了，下开弹窗要读新数据）
+                        if (ownerUsername) {
+                            delete dataCache.userStats[ownerUsername];
+                            _lsClearUserStats(ownerUsername);
+                        }
                         setTimeout(() => closeQuoteDetailModal(), 1500);
                     } else {
                         showToast(saveResult.message || 'Failed to save', 'error');
