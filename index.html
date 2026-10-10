@@ -1666,6 +1666,11 @@
         // GAS URL (v3.22c — 重新部署 2026-08-22)
         const GAS_URL = 'https://script.google.com/macros/s/AKfycbwgfqYgqqdWerRf3TvtSrM6IR9SsVePumEFrg2F84qJKVENG9FdbrCV0X_zIJtoBaQFGg/exec';
 
+        // ✅ 2026-10-10 v3.32 性能：localStorage 缓存统一超龄（7 天后丢弃，防陈旧账目误导）
+        //   定义在 GAS_URL 之后：reloadCommSettlementData (line ~2366) 也会用到这里，
+        //   放前面避免 const TDZ 隐患
+        const LS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
         // 数据缓存 - 用于加速页面加载
         const dataCache = {
             users: null,           // 用户列表缓存
@@ -2372,40 +2377,68 @@
             const cacheKey = 'commCache_v26_' + commSettlementKey;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
+
+            // ✅ 2026-10-10 v3.32 性能：原来 5 分钟 TTL 一到就硬等 3.4s。
+            //   改成"陈旧也先渲染 + 后台刷新"（stale-while-revalidate）：
+            //   任何时候点开都是秒开，数据新不新交给后台异步更新。
+            //   forceRefresh（手动点刷新按钮）才跳过缓存。
+            let _needBgRefresh = false;
             if (!forceRefresh) {
                 try {
                     const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-                    if (cached && (Date.now() - cached.timestamp) < 5 * 60 * 1000) {
-                        if (cacheStatusEl) cacheStatusEl.textContent = '✓ 缓存命中';
-                        if (cacheTimestampEl) cacheTimestampEl.textContent = '缓存于 ' + new Date(cached.timestamp).toLocaleTimeString();
+                    if (cached && cached.data && Date.now() - cached.timestamp < LS_MAX_AGE_MS) {
+                        // 立刻渲染缓存（秒开）
                         _processCommSettlementData(cached.data);
-                        return;
+                        const _ageSec = Math.round((Date.now() - cached.timestamp) / 1000);
+                        if (cacheStatusEl) {
+                            cacheStatusEl.textContent = _ageSec < 60
+                                ? '✓ 缓存命中'
+                                : '✓ 缓存 ' + Math.round(_ageSec / 60) + ' 分钟前';
+                        }
+                        if (cacheTimestampEl) {
+                            cacheTimestampEl.textContent = '缓存于 ' + new Date(cached.timestamp).toLocaleTimeString();
+                        }
+                        // 超过 30 秒就在后台静默刷新（用户看的是缓存，拿到新数据自动替换）
+                        if (_ageSec > 30) {
+                            _needBgRefresh = true;
+                            console.log('[v3.32] comm cache age =', _ageSec, 's, background refresh');
+                        } else {
+                            return;
+                        }
                     }
                 } catch (e) {}
             }
 
-            document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:#999;">加载中...</p>';
-            if (cacheStatusEl) cacheStatusEl.textContent = '加载中…';
+            // 需要后台刷新时不要显示"加载中"（避免闪一下空白）
+            if (!_needBgRefresh) {
+                document.getElementById('commSettlementContent').innerHTML = '<p style="text-align:center;color:#999;">加载中...</p>';
+                if (cacheStatusEl) cacheStatusEl.textContent = '加载中…';
+            }
 
             try {
                 // ✅ v3.26: 调 getUserSettlements (单一数据源 commission_settlement.json)
                 const response = await fetch(GAS_URL + '?action=getUserSettlements&username=' + encodeURIComponent(commSettlementKey));
                 const data = await response.json();
-                _processCommSettlementData(data);
-                // ✅ 写缓存 (v3.26 一个 user 一个 cache, 不分 tab)
-                try {
-                    localStorage.setItem(cacheKey, JSON.stringify({
-                        data: data,
-                        timestamp: Date.now()
-                    }));
-                } catch (e) {
-                    console.warn('Cache write failed (localStorage quota?):', e);
+                if (data && data.success) {
+                    _processCommSettlementData(data);
+                    // ✅ 写缓存 (v3.26 一个 user 一个 cache, 不分 tab)
+                    try {
+                        localStorage.setItem(cacheKey, JSON.stringify({
+                            data: data,
+                            timestamp: Date.now()
+                        }));
+                    } catch (e) {
+                        console.warn('Cache write failed (localStorage quota?):', e);
+                    }
+                    if (cacheStatusEl) cacheStatusEl.textContent = '✓ 已缓存';
+                    if (cacheTimestampEl) cacheTimestampEl.textContent = '更新于 ' + new Date().toLocaleTimeString();
+                } else if (!_needBgRefresh) {
+                    // ✅ v3.32: 后台刷新失败时不清空已渲染的缓存内容
+                    if (cacheStatusEl) cacheStatusEl.textContent = '✗ 加载失败';
                 }
-                if (cacheStatusEl) cacheStatusEl.textContent = '✓ 已缓存';
-                if (cacheTimestampEl) cacheTimestampEl.textContent = '更新于 ' + new Date().toLocaleTimeString();
             } catch (e) {
                 console.error('Error reloading:', e);
-                if (cacheStatusEl) cacheStatusEl.textContent = '✗ 加载失败';
+                if (!_needBgRefresh && cacheStatusEl) cacheStatusEl.textContent = '✗ 加载失败';
             }
         }
 
@@ -2414,6 +2447,8 @@
             if (!username) return;
             // ✅ v3.26: 单一 cache key, 无 tab 区分
             try { localStorage.removeItem('commCache_v26_' + username); } catch (e) {}
+            // ✅ v3.32: 也清 userStats 缓存（佣金结算状态变了，列表徽章要更新）
+            try { _lsClearUserStats(username); } catch (e) {}
             // 清历史版本 cache
             ['unsettled', 'settled', 'settled50', 'settled100', 'all'].forEach(function(tab) {
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
@@ -3436,7 +3471,6 @@
         //   - 读出来永远先渲染（秒开），再用 GAS 数据异步覆盖（最终一致）
         //   - 保存失败（隐私模式/超配额）静默降级，不影响主流程
         const LS_PREFIX = 'squirrel_userStats_';
-        const LS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;   // 7 天后不用（防陈旧数据误导）
 
         function _lsSaveUserStats(username, payload) {
             try {
@@ -3475,6 +3509,60 @@
 
         function _lsClearUserStats(username) {
             try { localStorage.removeItem(LS_PREFIX + username); } catch (e) {}
+        }
+
+        // ✅ 2026-10-10 v3.32 性能：Quote Details 弹窗 localStorage（秒开）
+        // ⚠️ 这是财务数据（定金/佣金/扣除），所以写操作必须清缓存，见 _lsClearQuoteDetail 调用点：
+        //   saveAllCommission / markQuoteCompleted / withdrawCommissionLock
+        const LS_QD_PREFIX = 'squirrel_quoteDetail_';
+
+        function _lsSaveQuoteDetail(projNo, quote) {
+            try {
+                localStorage.setItem(LS_QD_PREFIX + projNo, JSON.stringify({
+                    savedAt: Date.now(),
+                    quote: quote
+                }));
+            } catch (e) {
+                // 单条 quote JSON 可能 20KB+，10 个用户 × 50 单可能撑爆 5MB 配额
+                // 超限时删掉最旧的再试一次，仍失败就静默降级（内存/网络缓存仍有效）
+                console.warn('[v3.32] quoteDetail localStorage save failed:', e && e.name);
+                try {
+                    const keys = Object.keys(localStorage).filter(function(k) {
+                        return k.indexOf(LS_QD_PREFIX) === 0;
+                    });
+                    // 只留最近 30 条
+                    if (keys.length > 30) {
+                        const withTime = keys.map(function(k) {
+                            try { return { k: k, t: JSON.parse(localStorage.getItem(k)).savedAt || 0 }; }
+                            catch (e2) { return { k: k, t: 0 }; }
+                        }).sort(function(a, b) { return a.t - b.t; });
+                        withTime.slice(0, withTime.length - 30).forEach(function(o) {
+                            localStorage.removeItem(o.k);
+                        });
+                    }
+                    localStorage.setItem(LS_QD_PREFIX + projNo, JSON.stringify({ savedAt: Date.now(), quote: quote }));
+                } catch (e2) {}
+            }
+        }
+
+        function _lsLoadQuoteDetail(projNo) {
+            try {
+                const raw = localStorage.getItem(LS_QD_PREFIX + projNo);
+                if (!raw) return null;
+                const env = JSON.parse(raw);
+                if (!env || !env.quote) return null;
+                if (Date.now() - (env.savedAt || 0) > LS_MAX_AGE_MS) {
+                    localStorage.removeItem(LS_QD_PREFIX + projNo);
+                    return null;
+                }
+                return env.quote;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function _lsClearQuoteDetail(projNo) {
+            try { localStorage.removeItem(LS_QD_PREFIX + projNo); } catch (e) {}
         }
 
         // 预热 localStorage：登录后静默把上次的数据填进内存缓存（下次点用户立刻秒开）
@@ -3868,6 +3956,8 @@ function renderDetailQuoteList(quotes) {
                         _lsClearUserStats(currentEditingUser.username);
                         await fetchUserData(currentEditingUser.username);
                     }
+                    // v3.32: 清弹窗缓存（撤回会改 commission50/100SavedAt）
+                    _lsClearQuoteDetail(projNo);
                 } else {
                     showToast(result.message || 'Failed', 'error');
                 }
@@ -3889,31 +3979,57 @@ function renderDetailQuoteList(quotes) {
                 console.error('Modal elements not found');
                 return;
             }
-            content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+            // ✅ 2026-10-10 v3.32 性能：localStorage 先渲染（秒开），GAS 后台刷新
+            //   原来每次都等 GAS 3-13s 才显示内容
+            //   安全：写操作（保存佣金/mark完成/撤回）都会 _lsClearQuoteDetail，不会看到旧财务数据
+            let _renderedFromCache = false;
+            const _cachedQuote = _lsLoadQuoteDetail(projNo);
+            if (_cachedQuote) {
+                _renderedFromCache = true;
+                renderQuoteDetailModal(_cachedQuote);
+                _setCompleteBtnState(_cachedQuote);
+                console.log('[v3.32] quote detail rendered from localStorage:', projNo);
+            } else {
+                content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            }
             modal.classList.add('active');
+
             try {
                 const response = await fetch(GAS_URL + '?action=getQuoteDetail&projNo=' + encodeURIComponent(projNo));
                 const data = await response.json();
                 if (data.success && data.quote) {
                     renderQuoteDetailModal(data.quote);
-                    // ✅ 2026-08-07 设置"完成"按钮状态（Close 左侧的绿色按钮）
-                    const completeBtn = document.getElementById('quoteDetailCompleteBtn');
-                    if (completeBtn) {
-                        const isCompleted = data.quote.status === 'completed';
-                        completeBtn.textContent = isCompleted
-                            ? (currentLang === 'zh' ? '已完成 ✓' : 'Completed ✓')
-                            : (currentLang === 'zh' ? '完成' : 'Mark Completed');
-                        completeBtn.disabled = isCompleted;
-                        completeBtn.style.opacity = isCompleted ? '0.5' : '1';
-                        completeBtn.style.cursor = isCompleted ? 'not-allowed' : 'pointer';
-                    }
-                } else {
+                    _setCompleteBtnState(data.quote);
+                    // ✅ 只在 GAS 成功时写缓存（绝不用旧数据覆盖云端）
+                    _lsSaveQuoteDetail(projNo, data.quote);
+                } else if (!_renderedFromCache) {
                     content.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">' + (currentLang === 'zh' ? '无法加载报价详情' : 'Unable to load quote details') + '</p>';
                 }
             } catch (e) {
                 console.error('Error loading quote detail:', e);
-                content.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">' + (currentLang === 'zh' ? '加载失败' : 'Failed to load') + '</p>';
+                // ✅ 有缓存就保留已渲染内容，只提示（GAS 挂掉时不至于白屏）
+                if (!_renderedFromCache) {
+                    content.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">' + (currentLang === 'zh' ? '加载失败' : 'Failed to load') + '</p>';
+                } else {
+                    showToast(currentLang === 'zh'
+                        ? '云端连接失败，当前显示本地缓存数据'
+                        : 'Cloud unavailable, showing local cache', 'error');
+                }
             }
+        }
+
+        // 「完成」按钮状态（抽出来供缓存/GAS 两条路径共用）
+        function _setCompleteBtnState(quote) {
+            const completeBtn = document.getElementById('quoteDetailCompleteBtn');
+            if (!completeBtn || !quote) return;
+            const isCompleted = quote.status === 'completed';
+            completeBtn.textContent = isCompleted
+                ? (currentLang === 'zh' ? '已完成 ✓' : 'Completed ✓')
+                : (currentLang === 'zh' ? '完成' : 'Mark Completed');
+            completeBtn.disabled = isCompleted;
+            completeBtn.style.opacity = isCompleted ? '0.5' : '1';
+            completeBtn.style.cursor = isCompleted ? 'not-allowed' : 'pointer';
         }
 
         // ✅ 2026-08-07 新增：点击 Quote Details 的「完成」按钮
@@ -3968,6 +4084,8 @@ function renderDetailQuoteList(quotes) {
                         _lsClearUserStats(currentEditingUser.username);
                         fetchUserData(currentEditingUser.username);
                     }
+                    // v3.32: 清弹窗缓存（status 变了）
+                    _lsClearQuoteDetail(projNo);
                 } else {
                     showToast(result.message || 'Failed', 'error');
                     if (btn) {
@@ -4701,6 +4819,8 @@ deductCommissionPct: deductCommissionPct,
                             delete dataCache.userStats[ownerUsername];
                             _lsClearUserStats(ownerUsername);
                         }
+                        // v3.32: 弹窗缓存也要清（佣金变了，重开不能看到旧值）
+                        _lsClearQuoteDetail(projNo);
                         setTimeout(() => closeQuoteDetailModal(), 1500);
                     } else {
                         showToast(saveResult.message || 'Failed to save', 'error');
