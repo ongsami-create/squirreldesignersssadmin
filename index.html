@@ -2374,7 +2374,7 @@
 
             // ✅ v3.26: 改用 getUserSettlements (读 commission_settlement.json + 扫 quote, 4 tab 数据)
             // ✅ v3.22j 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v33_' + commSettlementKey;
+            const cacheKey = 'commCache_v34_' + commSettlementKey;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
 
@@ -2446,12 +2446,13 @@
         function invalidateCommCache(username) {
             if (!username) return;
             // ✅ v3.26: 单一 cache key, 无 tab 区分
-            try { localStorage.removeItem('commCache_v33_' + username); } catch (e) {}
+            try { localStorage.removeItem('commCache_v34_' + username); } catch (e) {}
             // ✅ v3.32: 也清 userStats 缓存（佣金结算状态变了，列表徽章要更新）
             try { _lsClearUserStats(username); } catch (e) {}
             // 清历史版本 cache
             ['unsettled', 'settled', 'settled50', 'settled100', 'all'].forEach(function(tab) {
                 try { localStorage.removeItem('commCache_v26_' + username + '_' + tab); } catch (e) {}
+                try { localStorage.removeItem('commCache_v33_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22i_' + username + '_' + tab); } catch (e) {}
@@ -2511,20 +2512,21 @@
                 const s100 = !!(q.settled100 && q.settled100[commSettlementKey]);
                 return (has50Pct ? s50 : true) && (has100Pct ? s100 : true);
             }
-            // ✅ v3.26 4-tab 过滤 (基于 liteQuote.unsettled / settled50 / settled100)
-            //   GAS 端 getUserSettlements 已经基于 Pct snapshot 算好了
-            // ✅ 2026-10-16 v3.33: 改成互斥分类，跟后端一致
-            //   旧逻辑: settled50 tab = q.settled50 → 一个单同时出现在 50% 和 100% 两个 tab
-            //   新逻辑: 有100标记 → 只在 100% tab; 只有50标记 → 只在 50% tab; 都没标 → 未结算
-            let filteredQuotes = data.quotes;
-            if (_currentCommTab === 'unsettled') {
-                filteredQuotes = data.quotes.filter(function(q) { return q.unsettled === true; });
-            } else if (_currentCommTab === 'settled50') {
-                filteredQuotes = data.quotes.filter(function(q) { return q.settled50 === true && q.settled100 !== true; });
-            } else if (_currentCommTab === 'settled100') {
-                filteredQuotes = data.quotes.filter(function(q) { return q.settled100 === true; });
-            }
-            // 'all' tab 不过滤, 全部显示
+            // ✅ 2026-10-16 v3.34: 判定基准 =「有没有算出佣金(Pct)但还没标记」
+                //   用户规则：只有输入了 Pct 才算未结算；钱进账但没输入 Pct 不算
+                //   → settled100 只看标记; settled50 要"已标记 且 100% 池没待结算佣金"
+                let filteredQuotes = data.quotes;
+                if (_currentCommTab === 'unsettled') {
+                    filteredQuotes = data.quotes.filter(function(q) { return q.unsettled === true; });
+                } else if (_currentCommTab === 'settled50') {
+                    // ⚠️ 100% 池还有佣金没结算的单 → 已被 GAS 归到未结算，不该出现在这里
+                    filteredQuotes = data.quotes.filter(function(q) {
+                        return q.settled50 === true && q.settled100 !== true && q.pending100 !== true;
+                    });
+                } else if (_currentCommTab === 'settled100') {
+                    filteredQuotes = data.quotes.filter(function(q) { return q.settled100 === true; });
+                }
+                // 'all' tab 不过滤, 全部显示
 
             const projectCommMap = {}; // 按项目合并
             const displayName = currentCommUser;
@@ -2650,6 +2652,9 @@
                             // ✅ 2026-10-16 v3.33: Pct 变更警告（结算后又改了 Pct）
                             pctChanged50: !!quote.pctChanged50,
                             pctChanged100: !!quote.pctChanged100,
+                            // v3.34: 哪一池还有佣金没结算
+                            pending50: !!quote.pending50,
+                            pending100: !!quote.pending100,
                             roles: rolesWithDeduct,
                             quote: quote,
                             deductSharedRoles: deductSharedRoles,
@@ -2740,12 +2745,20 @@
                 const pctWarn = (d.pctChanged50 || d.pctChanged100)
                     ? '<span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;" title="' + (currentLang === 'zh' ? '结算后佣金%被修改过，请核对' : 'Commission% changed after settlement, please review') + '">⚠️ Pct已改</span>'
                     : '';
+                // ✅ 2026-10-16 v3.34: 待结算徽章（哪一池的佣金还没结，一眼看清）
+                const pendingTxt = [
+                    d.pending50 ? (currentLang === 'zh' ? '50%待结算' : '50% pending') : '',
+                    d.pending100 ? (currentLang === 'zh' ? '100%待结算' : '100% pending') : ''
+                ].filter(Boolean).join(' · ');
+                const pendingBadge = pendingTxt
+                    ? '<span style="background:#dc3545;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;font-weight:600;">' + pendingTxt + '</span>'
+                    : '';
 
                 html += '<tr style="' + rowStyle + '">';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
                 html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? '' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
                 html += '</td>';
-                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + pctWarn + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
+                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + pctWarn + pendingBadge + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;line-height:1.6;">' + roleLabels + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;">' + d.debtPercent + '%</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled50 ? '✓' : 'RM ' + formatNumber(d.comm50)) + '</td>';
