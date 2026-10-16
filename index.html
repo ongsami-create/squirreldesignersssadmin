@@ -2374,7 +2374,7 @@
 
             // ✅ v3.26: 改用 getUserSettlements (读 commission_settlement.json + 扫 quote, 4 tab 数据)
             // ✅ v3.22j 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v26_' + commSettlementKey;
+            const cacheKey = 'commCache_v33_' + commSettlementKey;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
 
@@ -2446,11 +2446,12 @@
         function invalidateCommCache(username) {
             if (!username) return;
             // ✅ v3.26: 单一 cache key, 无 tab 区分
-            try { localStorage.removeItem('commCache_v26_' + username); } catch (e) {}
+            try { localStorage.removeItem('commCache_v33_' + username); } catch (e) {}
             // ✅ v3.32: 也清 userStats 缓存（佣金结算状态变了，列表徽章要更新）
             try { _lsClearUserStats(username); } catch (e) {}
             // 清历史版本 cache
             ['unsettled', 'settled', 'settled50', 'settled100', 'all'].forEach(function(tab) {
+                try { localStorage.removeItem('commCache_v26_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22h_' + username + '_' + tab); } catch (e) {}
                 try { localStorage.removeItem('commCache_v22i_' + username + '_' + tab); } catch (e) {}
@@ -2512,11 +2513,14 @@
             }
             // ✅ v3.26 4-tab 过滤 (基于 liteQuote.unsettled / settled50 / settled100)
             //   GAS 端 getUserSettlements 已经基于 Pct snapshot 算好了
+            // ✅ 2026-10-16 v3.33: 改成互斥分类，跟后端一致
+            //   旧逻辑: settled50 tab = q.settled50 → 一个单同时出现在 50% 和 100% 两个 tab
+            //   新逻辑: 有100标记 → 只在 100% tab; 只有50标记 → 只在 50% tab; 都没标 → 未结算
             let filteredQuotes = data.quotes;
             if (_currentCommTab === 'unsettled') {
                 filteredQuotes = data.quotes.filter(function(q) { return q.unsettled === true; });
             } else if (_currentCommTab === 'settled50') {
-                filteredQuotes = data.quotes.filter(function(q) { return q.settled50 === true; });
+                filteredQuotes = data.quotes.filter(function(q) { return q.settled50 === true && q.settled100 !== true; });
             } else if (_currentCommTab === 'settled100') {
                 filteredQuotes = data.quotes.filter(function(q) { return q.settled100 === true; });
             }
@@ -2643,6 +2647,9 @@
                             //   (不要用 _pool, _pool 已在 v3.24 删除, 否则 ReferenceError 中断 forEach)
                             paidAmount50: paidAmount50,
                             paidAmount100: paidAmount100,
+                            // ✅ 2026-10-16 v3.33: Pct 变更警告（结算后又改了 Pct）
+                            pctChanged50: !!quote.pctChanged50,
+                            pctChanged100: !!quote.pctChanged100,
                             roles: rolesWithDeduct,
                             quote: quote,
                             deductSharedRoles: deductSharedRoles,
@@ -2729,12 +2736,16 @@
                 // 50/100 池标识（项目级）
                 const poolBadge50 = d.project50Saved ? '<span style="background:#e0e0e0;color:#666;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;">50池已结</span>' : '';
                 const poolBadge100 = d.project100Saved ? '<span style="background:#e0e0e0;color:#666;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;">100池已结</span>' : '';
+                // ✅ 2026-10-16 v3.33: 结算后 Pct 又被改动的警告（不再影响 tab 分类，只做提示）
+                const pctWarn = (d.pctChanged50 || d.pctChanged100)
+                    ? '<span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;" title="' + (currentLang === 'zh' ? '结算后佣金%被修改过，请核对' : 'Commission% changed after settlement, please review') + '">⚠️ Pct已改</span>'
+                    : '';
 
                 html += '<tr style="' + rowStyle + '">';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
                 html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? '' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
                 html += '</td>';
-                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
+                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + pctWarn + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;line-height:1.6;">' + roleLabels + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;">' + d.debtPercent + '%</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled50 ? '✓' : 'RM ' + formatNumber(d.comm50)) + '</td>';
