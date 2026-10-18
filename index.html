@@ -1024,7 +1024,8 @@
                     <div class="nav-card-badge" style="color:#28a745;">🔗 点击进入</div>
                 </div>
                 <!-- ✅ 2026-08-15 新增：公司报表（凑齐 8 个菜单） -->
-                <div class="nav-card" onclick="showDeveloping()">
+                <!-- ✅ 2026-10-18 改为「客户画像」，链接到 OrderFile -->
+                <div class="nav-card" onclick="openNavLink('https://ongsami-create.github.io/orderfile/')">
                     <div class="nav-card-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 3v18h18"></path>
@@ -1033,8 +1034,8 @@
                             <path d="M8 17v-3"></path>
                         </svg>
                     </div>
-                    <div class="nav-card-title">公司报表</div>
-                    <div class="nav-card-badge" data-i18n="inDev">开发中</div>
+                    <div class="nav-card-title" data-i18n="customerProfile">客户画像</div>
+                    <div class="nav-card-badge" style="color:#28a745;">🔗 点击进入</div>
                 </div>
             </div>
 
@@ -1754,6 +1755,7 @@
                 announcement: '公告系统',
                 productManagement: '产品管理',
                 orderManagement: '订单管理',
+                customerProfile: '客户画像',
                 inDev: '开发中',
                 userDetails: '用户详情',
                 quoteCount: '报价数量',
@@ -1825,6 +1827,7 @@
                 announcement: 'Announcement',
                 productManagement: 'Product Management',
                 orderManagement: 'Order Management',
+                customerProfile: 'Customer Profile',
                 inDev: 'Under Development',
                 userDetails: 'User Details',
                 quoteCount: 'Quote Count',
