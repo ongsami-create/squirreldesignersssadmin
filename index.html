@@ -1688,6 +1688,91 @@
         //   放前面避免 const TDZ 隐患
         const LS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+        // ============================================================
+        // ✅ 2026-11-18 v3.35 前端性能核心（只改速度，不改界面与功能）
+        // ============================================================
+        // 背景：GAS 单次调用很慢（getUserSettlements 46.67s / getQuoteDetail 17.34s /
+        //   getAllUsersStatistics 15.70s / getUserStatistics 12.59s / getDetailedUsers 4.77s）。
+        //   原前端在几个地方会对同一个接口「并发发多次」：
+        //     - 切佣金结算 tab：每次都触发一次 46s 的后台刷新（切 4 个 tab = 4 个并发请求）
+        //     - 连点同一个用户 / 同一个报价：重复拉同一份数据
+        //   既拖慢 GAS 队列，也让「慢的旧响应」覆盖「快的新响应」。
+        //
+        // ⚠️ 铁律：只合并「同一个 URL 的并发 GET 读请求」。
+        //   写操作（saveQuote / markSettled / withdrawSettled / markQuoteCompleted …）
+        //   一律不合并、不并发 —— 保持原有顺序语义与强一致。
+        const _inflightGets = new Map();
+
+        function _getJson(url) {
+            if (_inflightGets.has(url)) return _inflightGets.get(url);
+            const p = fetch(url)
+                .then(function(r) { return r.json(); })
+                .finally(function() { _inflightGets.delete(url); });
+            _inflightGets.set(url, p);
+            return p;
+        }
+
+        // 后台刷新节流：同一份数据 30 秒内不重复拉（纯 SWR，用户无感知）
+        const BG_REFRESH_MIN_INTERVAL_MS = 30 * 1000;
+
+        // ✅ 2026-11-18 v3.35：报价详情渲染令牌（防慢响应覆盖新弹窗，见 openQuoteDetail）
+        let _quoteDetailToken = 0;
+
+        // ============================================================
+        // ✅ 2026-11-18 v3.35 安全：鉴权 token 传递
+        // ============================================================
+        // 后端给「写操作」加了 token 校验；读操作不加，所以所有人的日常使用体验不变。
+        //   1) adminLogin 成功 → data.token 存 sessionStorage
+        //   2) 所有写操作请求带上 token
+        //   3) 读操作（ping / getDetailedUsers / getQuoteDetail / getUserSettlements …）一律不带
+        //   4) adminLogin 本身不带 token（那是签发 token 的接口）
+        function _adminToken() {
+            try { return sessionStorage.getItem('adminToken') || ''; } catch (e) { return ''; }
+        }
+
+        // GET 形式的写操作：URL 拼 token
+        function _wt_(url) {
+            return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(_adminToken());
+        }
+
+        // POST 形式的写操作：token 走表单字段（GAS doPost 只读 e.parameter，表单最稳）
+        function _postWrite_(url, params) {
+            try { params.append('token', _adminToken()); } catch (e) {}
+            return fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                body: params
+            });
+        }
+
+        // 识别后端的鉴权失败（不同版本文案不一样，做宽松匹配）
+        function _isAuthError_(data) {
+            if (!data) return false;
+            const msg = String(data.message || data.error || '');
+            return /invalid\s*token|token\s*(?:is\s*)?(?:expired|invalid|missing|required|not\s*found)|unauthori[sz]ed|forbidden|鉴权失败|未授权|登录已过期|请重新登录/i.test(msg);
+        }
+
+        // 鉴权失败 → 中文友好提示 + 清登录态 + 回登录页（不要弹原始英文，也不要白屏）
+        function _handleAuthError_(data) {
+            try {
+                sessionStorage.removeItem('adminToken');
+                sessionStorage.removeItem('adminLoggedIn');
+                sessionStorage.removeItem('adminUsername');
+            } catch (e) {}
+            showToast(currentLang === 'zh'
+                ? '登录已过期，请重新登录'
+                : 'Session expired, please sign in again', 'error');
+            setTimeout(function() { location.reload(); }, 1500);
+            return true;
+        }
+
+        // 写操作统一的结果处理：鉴权失败走友好提示，其它错误照旧
+        function _writeResult_(data) {
+            if (data && data.success) return true;
+            if (_isAuthError_(data)) { _handleAuthError_(data); return false; }
+            return false;
+        }
+
         // 数据缓存 - 用于加速页面加载
         const dataCache = {
             users: null,           // 用户列表缓存
@@ -1911,9 +1996,28 @@
             const isLoggedIn = sessionStorage.getItem('adminLoggedIn');
             if (isLoggedIn) {
                 showAdminPage();
+                // ✅ v3.35 审查员 F10: 旧会话只有 adminLoggedIn、没有 token
+                //   → 能进后台, 但第一次写操作才被踢回登录页(用户以为数据丢了)
+                //   ⚠️ 不能直接拦: 部署顺序是"先前端后 GAS", 前端先上线时后端还是旧版(不要 token)
+                //   → 只有后端已升级到 v3.35(要 token)才提示重新登录。
+                _warnIfTokenNeeded_();
             } else {
                 document.getElementById('loginPage').classList.remove('hidden');
             }
+        }
+
+        // 后端已要 token 但本机没有 → 友好提示 + 回登录页(只读接口, 不需要鉴权)
+        function _warnIfTokenNeeded_() {
+            try {
+                if (sessionStorage.getItem('adminToken')) return;   // 有 token, 正常
+            } catch (e) { return; }
+            fetch(GAS_URL + '?action=getVersion').then(function(r) { return r.json(); })
+                .then(function(v) {
+                    if (!v || !v.success) return;
+                    var ver = String(v.version || '').replace(/^v/, '');
+                    if (parseFloat(ver) >= 3.35) _handleAuthError_({ message: 'token missing' });
+                })
+                .catch(function() {});
         }
 
         // Setup login form
@@ -1949,6 +2053,10 @@
                 if (data.success) {
                     sessionStorage.setItem('adminLoggedIn', 'true');
                     sessionStorage.setItem('adminUsername', username);
+                    // ✅ 2026-11-18 v3.35 安全：存后端下发的鉴权 token（写操作用）
+                    if (data.token) {
+                        try { sessionStorage.setItem('adminToken', data.token); } catch (e) {}
+                    }
                     // 登录成功后清除缓存，强制刷新
                     dataCache.users = null;
                     dataCache.lastFetch = null;
@@ -2003,9 +2111,13 @@
             try {
                 // 第一次：先 build cache（~120s，写 20 个小 JSON 到 Drive）
                 text.textContent = '⚡ 首次预加载：构建 cache (~120秒)...';
-                const buildResp = await fetch(GAS_URL + '?action=buildAllUserStatsCache');
+                const buildResp = await fetch(_wt_(GAS_URL + '?action=buildAllUserStatsCache'));
                 const buildData = await buildResp.json();
-                if (!buildData.success) throw new Error(buildData.message || 'build failed');
+                // ✅ v3.35 审查员 F9: 鉴权失败要走友好提示 + 回登录页(原来直接抛英文原文)
+                if (!buildData.success) {
+                    if (_isAuthError_(buildData)) { _handleAuthError_(buildData); return; }
+                    throw new Error(buildData.message || 'build failed');
+                }
                 // 第二次：读 cache（< 2s，N 个小文件）
                 text.textContent = '⚡ 读 cache...';
                 const readResp = await fetch(GAS_URL + '?action=getAllUserStatsCache');
@@ -2049,9 +2161,13 @@
             const t0 = Date.now();
             text.textContent = '🔨 扫所有 quote...';
             try {
-                const resp = await fetch(GAS_URL + '?action=buildQuoteIndex');
+                const resp = await fetch(_wt_(GAS_URL + '?action=buildQuoteIndex'));
                 const data = await resp.json();
-                if (!data.success) throw new Error(data.message || 'build failed');
+                // ✅ v3.35 审查员 F9: 鉴权失败要走友好提示 + 回登录页(原来直接抛英文原文)
+                if (!data.success) {
+                    if (_isAuthError_(data)) { _handleAuthError_(data); return; }
+                    throw new Error(data.message || 'build failed');
+                }
                 const dt = ((Date.now() - t0) / 1000).toFixed(1);
                 const stats = data.stats || {};
                 const userCount = stats.userCount || 0;
@@ -2076,30 +2192,10 @@
             }
         }
 
-        // Load users
-        async function loadUsers() {
-            try {
-                if (dataCache.users && Date.now() - dataCache.lastFetch < 5 * 60 * 1000) {
-                    users = dataCache.users;
-                    renderUserTable();
-                    updateStats();
-                    return;
-                }
-                const response = await fetch(GAS_URL + '?action=getDetailedUsers');
-                const data = await response.json();
-                if (data.success) {
-                    users = data.users || [];
-                    dataCache.users = users;
-                    dataCache.lastFetch = Date.now();
-                    renderUserTable();
-                    updateStats();
-                }
-            } catch (error) {
-                console.error('Failed to load users:', error);
-            }
-        }
+        // ⚠️ 2026-11-18 v3.35：此处原本有第二份 loadUsers() 定义（与下面那份逻辑完全重复）。
+        //   JS 函数声明会被后一份覆盖，所以前一份从未生效 —— 已删除，避免后续维护踩坑。
+        //   两份逻辑一模一样，删除不改变任何行为。
 
-        // ???????????
         async function preloadAllUserStats() {
             if (!users || users.length === 0) return;
 
@@ -2123,6 +2219,8 @@
         function logout() {
             sessionStorage.removeItem('adminLoggedIn');
             sessionStorage.removeItem('adminUsername');
+            // ✅ 2026-11-18 v3.35 安全：清掉鉴权 token
+            sessionStorage.removeItem('adminToken');
             location.reload();
         }
 
@@ -2137,8 +2235,12 @@
                     return;
                 }
 
-                const response = await fetch(GAS_URL + '?action=getDetailedUsers');
-                const data = await response.json();
+                // ✅ 2026-11-18 v3.35 性能：getDetailedUsers 与 getAdminStats 并行发起。
+                //   原来两者是串行的 —— 先等用户列表回来（~4.8s），才发统计请求。
+                //   现在总耗时 = max(两者)，而不是两者相加。
+                const _statsPromise = _fetchAdminStats();   // 不 await，并行跑
+
+                const data = await _getJson(GAS_URL + '?action=getDetailedUsers');
 
                 if (data.success) {
                     users = data.users || [];
@@ -2146,8 +2248,10 @@
                     dataCache.users = users;
                     dataCache.lastFetch = Date.now();
                     renderUserTable();
-                    updateStats();
+                    document.getElementById('totalUsers').textContent = users.length;
                 }
+                // 等统计请求结束（内部已 try/catch，不会抛）
+                await _statsPromise;
             } catch (error) {
                 console.error('Failed to load users:', error);
             }
@@ -2169,6 +2273,12 @@
                 const statusText = user.isActive ? translations[currentLang].active : translations[currentLang].frozen;
                 const lastLogin = user.lastLogin ? formatDate(user.lastLogin) : '-';
 
+                // ✅ 2026-11-18 v3.35 安全：参数走 data-* 属性 + this.dataset，
+                //   彻底移除内联 onclick 里的字符串拼接（拼接会被 ' 闭合 → XSS）。
+                //   encodeURIComponent 保证属性值里不可能出现能破坏属性的字符。
+                const _u = encodeURIComponent(user.username || '');
+                const _d = encodeURIComponent(user.displayName || user.username || '');
+
                 return `
                     <tr>
                         <td>${escapeHtml(user.displayName || user.username || '-')}</td>
@@ -2178,9 +2288,9 @@
                         <td>${lastLogin}</td>
                         <td>
                             <div class="action-btns">
-                                <button class="btn btn-sm btn-secondary" onclick="viewUserDetails('${escapeHtml(user.username)}')">${translations[currentLang].viewDetails}</button>
-                                <button class="btn btn-sm btn-primary" onclick="openEditUserModal('${escapeHtml(user.username)}')">${translations[currentLang].edit}</button>
-                                <button class="btn btn-sm btn-success" onclick="openCommissionSettlement('${escapeHtml(user.displayName || user.username)}', '${escapeHtml(user.username)}')">${currentLang==='zh'?'佣金结算':'Comm Settle'}</button>
+                                <button class="btn btn-sm btn-secondary" data-username="${_u}" onclick="viewUserDetails(decodeURIComponent(this.dataset.username))">${translations[currentLang].viewDetails}</button>
+                                <button class="btn btn-sm btn-primary" data-username="${_u}" onclick="openEditUserModal(decodeURIComponent(this.dataset.username))">${translations[currentLang].edit}</button>
+                                <button class="btn btn-sm btn-success" data-dname="${_d}" data-username="${_u}" onclick="openCommissionSettlement(decodeURIComponent(this.dataset.dname), decodeURIComponent(this.dataset.username))">${currentLang==='zh'?'佣金结算':'Comm Settle'}</button>
                             </div>
                         </td>
                     </tr>
@@ -2191,9 +2301,14 @@
         // Update stats
         async function updateStats() {
             document.getElementById('totalUsers').textContent = users.length;
+            await _fetchAdminStats();
+        }
+
+        // ✅ 2026-11-18 v3.35 性能：只负责 GAS 统计（totalSales / totalDebt），
+        //   拆出来是为了能和其它请求并行发起（不阻塞用户表格渲染）。
+        async function _fetchAdminStats() {
             try {
-                const response = await fetch(GAS_URL + '?action=getAdminStats');
-                const data = await response.json();
+                const data = await _getJson(GAS_URL + '?action=getAdminStats');
                 if (data.success && data.stats) {
                     document.getElementById('totalSales').textContent = 'RM ' + formatNumber(data.stats.totalSales || 0);
                     document.getElementById('totalDebt').textContent = 'RM ' + formatNumber(data.stats.totalDebt || 0);
@@ -2258,17 +2373,20 @@
             }
 
             try {
-                const response = await fetch(GAS_URL + '?action=adminAddUser&username=' + encodeURIComponent(account) +
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(GAS_URL + '?action=adminAddUser&username=' + encodeURIComponent(account) +
                     '&password=' + encodeURIComponent(password) +
                     '&displayName=' + encodeURIComponent(displayName) +
                     '&departments=' + encodeURIComponent(departments.join(',')) +
-                    '&isActive=' + status);
+                    '&isActive=' + status));
                 const data = await response.json();
 
                 if (data.success) {
                     showToast(translations[currentLang].saveSuccess, 'success');
                     closeAddUserModal();
                     loadUsers();
+                } else if (_isAuthError_(data)) {
+                    _handleAuthError_(data);
                 } else {
                     showToast(data.message || 'Failed to add user', 'error');
                 }
@@ -2395,13 +2513,74 @@
             reloadCommSettlementData();
         }
 
+        // ✅ 2026-11-18 v3.35 性能：佣金结算数据加载（getUserSettlements = 最慢接口，46.67s）
+        //
+        // 原实现的 3 个问题（都只影响速度与数据正确性，不影响界面外观）：
+        //  1) 切 tab 会重复发请求：switchCommSettleTab → reloadCommSettlementData()，
+        //     缓存超过 30 秒就触发一次后台刷新 —— 切 4 个 tab = 4 个并发的 46s 请求，
+        //     把 GAS 队列打满，用户反而更慢。
+        //  2) 没有在飞合并：连续点同一个用户会并发发多个同样的 46s 请求。
+        //  3) 没有过期响应保护：用户 A 的慢响应回来时用户 B 的弹窗已经打开，
+        //     A 的数据会被渲染进 B 的弹窗（串数据）。
+        //
+        // 现在的做法：
+        //  - 内存缓存 _commMemCache：切 tab 不再重复 JSON.parse 大对象
+        //  - 在飞合并 _commFetchSettlements：同一用户同时只有 1 个请求在飞
+        //  - 后台刷新节流：同一用户 30 秒内最多 1 次刷新尝试
+        //  - 过期响应保护：commSettlementKey 变了就不渲染
+        const _commMemCache = {};         // username -> { data, timestamp }
+        const _commRefreshInFlight = {};  // username -> Promise
+        const _commLastAttemptAt = {};    // username -> timestamp（上次发起刷新尝试的时间）
+
+        function _commGetCached(key, cacheKey) {
+            // 内存优先（最快，连 localStorage 都不用读）
+            const mem = _commMemCache[key];
+            if (mem && mem.data) return { data: mem.data, timestamp: mem.timestamp };
+            try {
+                const parsed = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+                if (parsed && parsed.data) {
+                    _commMemCache[key] = { data: parsed.data, timestamp: parsed.timestamp };
+                    return parsed;
+                }
+            } catch (e) {}
+            return null;
+        }
+
+        // 取数 + 写缓存。同一用户同时只允许一个在飞（后来的调用直接等前一个的结果）
+        function _commFetchSettlements(key, cacheKey) {
+            if (_commRefreshInFlight[key]) return _commRefreshInFlight[key];
+            const p = fetch(GAS_URL + '?action=getUserSettlements&username=' + encodeURIComponent(key))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data && data.success) {
+                        const now = Date.now();
+                        _commMemCache[key] = { data: data, timestamp: now };
+                        // ✅ 写缓存 (v3.26 一个 user 一个 cache, 不分 tab)
+                        try {
+                            localStorage.setItem(cacheKey, JSON.stringify({
+                                data: data,
+                                timestamp: now
+                            }));
+                        } catch (e) {
+                            console.warn('Cache write failed (localStorage quota?):', e);
+                        }
+                    }
+                    return data;
+                })
+                .finally(function() { delete _commRefreshInFlight[key]; });
+            _commRefreshInFlight[key] = p;
+            return p;
+        }
+
         async function reloadCommSettlementData(forceRefresh) {
             if (!commSettlementKey) return;
             forceRefresh = !!forceRefresh;
 
             // ✅ v3.26: 改用 getUserSettlements (读 commission_settlement.json + 扫 quote, 4 tab 数据)
             // ✅ v3.22j 加版本后缀, 自动失效旧 cache
-            const cacheKey = 'commCache_v34_' + commSettlementKey;
+            // ⚠️ v3.35: 快照当前用户 —— await 之后要确认用户没被换掉（防串数据）
+            const key = commSettlementKey;
+            const cacheKey = 'commCache_v34_' + key;
             const cacheTimestampEl = document.getElementById('commCacheTimestamp');
             const cacheStatusEl = document.getElementById('commCacheStatus');
 
@@ -2411,29 +2590,27 @@
             //   forceRefresh（手动点刷新按钮）才跳过缓存。
             let _needBgRefresh = false;
             if (!forceRefresh) {
-                try {
-                    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-                    if (cached && cached.data && Date.now() - cached.timestamp < LS_MAX_AGE_MS) {
-                        // 立刻渲染缓存（秒开）
-                        _processCommSettlementData(cached.data);
-                        const _ageSec = Math.round((Date.now() - cached.timestamp) / 1000);
-                        if (cacheStatusEl) {
-                            cacheStatusEl.textContent = _ageSec < 60
-                                ? '✓ 缓存命中'
-                                : '✓ 缓存 ' + Math.round(_ageSec / 60) + ' 分钟前';
-                        }
-                        if (cacheTimestampEl) {
-                            cacheTimestampEl.textContent = '缓存于 ' + new Date(cached.timestamp).toLocaleTimeString();
-                        }
-                        // 超过 30 秒就在后台静默刷新（用户看的是缓存，拿到新数据自动替换）
-                        if (_ageSec > 30) {
-                            _needBgRefresh = true;
-                            console.log('[v3.32] comm cache age =', _ageSec, 's, background refresh');
-                        } else {
-                            return;
-                        }
+                const cached = _commGetCached(key, cacheKey);
+                if (cached && Date.now() - cached.timestamp < LS_MAX_AGE_MS) {
+                    // 立刻渲染缓存（秒开）
+                    _processCommSettlementData(cached.data);
+                    const _ageSec = Math.round((Date.now() - cached.timestamp) / 1000);
+                    if (cacheStatusEl) {
+                        cacheStatusEl.textContent = _ageSec < 60
+                            ? '✓ 缓存命中'
+                            : '✓ 缓存 ' + Math.round(_ageSec / 60) + ' 分钟前';
                     }
-                } catch (e) {}
+                    if (cacheTimestampEl) {
+                        cacheTimestampEl.textContent = '缓存于 ' + new Date(cached.timestamp).toLocaleTimeString();
+                    }
+                    // 超过 30 秒就在后台静默刷新（用户看的是缓存，拿到新数据自动替换）
+                    if (_ageSec > 30) {
+                        _needBgRefresh = true;
+                        console.log('[v3.35] comm cache age =', _ageSec, 's, background refresh');
+                    } else {
+                        return;
+                    }
+                }
             }
 
             // 需要后台刷新时不要显示"加载中"（避免闪一下空白）
@@ -2442,21 +2619,26 @@
                 if (cacheStatusEl) cacheStatusEl.textContent = '加载中…';
             }
 
+            // ✅ v3.35 后台刷新节流 —— 同一用户 30 秒内不重复发起刷新尝试。
+            //   原来切 4 个 tab 会并发发 4 个 46s 的 getUserSettlements。
+            //   注意：只有「后台刷新」路径受节流限制；
+            //   首次打开（无缓存）和手动点刷新（forceRefresh）永远照常发。
+            const _now = Date.now();
+            if (_needBgRefresh && (_now - (_commLastAttemptAt[key] || 0)) < BG_REFRESH_MIN_INTERVAL_MS) {
+                return;
+            }
+            _commLastAttemptAt[key] = _now;
+
             try {
                 // ✅ v3.26: 调 getUserSettlements (单一数据源 commission_settlement.json)
-                const response = await fetch(GAS_URL + '?action=getUserSettlements&username=' + encodeURIComponent(commSettlementKey));
-                const data = await response.json();
+                //   v3.35: 同一用户同时只有 1 个请求在飞，后来者等前一个
+                const data = await _commFetchSettlements(key, cacheKey);
+
+                // ✅ v3.35 过期响应保护：用户已经切到别人了，别把旧数据渲染过去
+                if (commSettlementKey !== key) return;
+
                 if (data && data.success) {
                     _processCommSettlementData(data);
-                    // ✅ 写缓存 (v3.26 一个 user 一个 cache, 不分 tab)
-                    try {
-                        localStorage.setItem(cacheKey, JSON.stringify({
-                            data: data,
-                            timestamp: Date.now()
-                        }));
-                    } catch (e) {
-                        console.warn('Cache write failed (localStorage quota?):', e);
-                    }
                     if (cacheStatusEl) cacheStatusEl.textContent = '✓ 已缓存';
                     if (cacheTimestampEl) cacheTimestampEl.textContent = '更新于 ' + new Date().toLocaleTimeString();
                 } else if (!_needBgRefresh) {
@@ -2465,7 +2647,7 @@
                 }
             } catch (e) {
                 console.error('Error reloading:', e);
-                if (!_needBgRefresh && cacheStatusEl) cacheStatusEl.textContent = '✗ 加载失败';
+                if (!_needBgRefresh && cacheStatusEl && commSettlementKey === key) cacheStatusEl.textContent = '✗ 加载失败';
             }
         }
 
@@ -2474,6 +2656,10 @@
             if (!username) return;
             // ✅ v3.26: 单一 cache key, 无 tab 区分
             try { localStorage.removeItem('commCache_v34_' + username); } catch (e) {}
+            // ✅ v3.35: 也清内存缓存（否则标记结算后还会渲染旧的内存数据）
+            try { delete _commMemCache[username]; } catch (e) {}
+            // ✅ v3.35: 也清后台刷新节流记录（下次点开要能立刻拿到新数据）
+            try { delete _commLastAttemptAt[username]; } catch (e) {}
             // ✅ v3.32: 也清 userStats 缓存（佣金结算状态变了，列表徽章要更新）
             try { _lsClearUserStats(username); } catch (e) {}
             // 清历史版本 cache
@@ -2763,7 +2949,8 @@
                 const canCheck = !isAllSettled;
 
                 // 角色显示（多个角色用逗号分隔）
-                const roleLabels = d.roles.map(r => r.role).join(', ');
+                // ✅ 2026-11-18 v3.35 安全：角色名来自报价 JSON（业务员可填），必须转义
+                const roleLabels = d.roles.map(r => escapeHtml(r.role)).join(', ');
 
                 // 50/100 池标识（项目级）
                 const poolBadge50 = d.project50Saved ? '<span style="background:#e0e0e0;color:#666;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px;">50池已结</span>' : '';
@@ -2785,9 +2972,11 @@
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:center;">';
                 html += '<input type="checkbox" class="comm-cb" data-idx="' + idx + '" ' + (canCheck ? '' : 'disabled checked') + ' onchange="updateCommSettlementTotal()">';
                 html += '</td>';
-                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + d.projNo + '</a>' + poolBadge50 + poolBadge100 + pctWarn + pendingBadge + '<br><small style="color:#666;">' + (d.date ? formatDate(d.date) : '') + ' · ' + d.customerName + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
+                // ✅ 2026-11-18 v3.35 安全：projNo / date / customerName 都来自报价 JSON
+                //   （业务员可任意填写），拼进 innerHTML 前必须转义，否则是存储型 XSS。
+                html += '<td style="padding:8px;border:1px solid #ddd;"><a href="#" onclick="toggleCommDetail(this,' + idx + ')" style="color:#00B3B8;text-decoration:none;font-weight:600;">' + escapeHtml(d.projNo) + '</a>' + poolBadge50 + poolBadge100 + pctWarn + pendingBadge + '<br><small style="color:#666;">' + (d.date ? escapeHtml(formatDate(d.date)) : '') + ' · ' + escapeHtml(d.customerName) + ' · 50池:RM ' + formatNumber(d.paidAmount50||0) + ' / 100池:RM ' + formatNumber(d.paidAmount100||0) + '</small></td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;line-height:1.6;">' + roleLabels + '</td>';
-                html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;">' + d.debtPercent + '%</td>';
+                html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;">' + escapeHtml(d.debtPercent) + '%</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled50 ? '✓' : 'RM ' + formatNumber(d.comm50)) + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#00B3B8;font-weight:600;">' + (d.settled100 ? '✓' : 'RM ' + formatNumber(d.comm100)) + '</td>';
                 html += '<td style="padding:8px;border:1px solid #ddd;text-align:right;color:#c00;">' + (d.settled100 ? '✓' : (d.deductAmt > 0 ? 'RM ' + formatNumber(d.deductAmt) : '-')) + '</td>';
@@ -2875,9 +3064,10 @@
                         }
                     }
                     html += '<div style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:10px;">';
-                    html += '<div style="font-weight:600;color:#00B3B8;margin-bottom:5px;">' + role.role + '</div>';
-                    html += '<div style="font-size:12px;color:#666;">50% = RM ' + formatNumber(role.comm50) + ' (' + role.pct50 + '%)</div>';
-                    html += '<div style="font-size:12px;color:#666;">100% = RM ' + formatNumber(role.comm100) + ' (' + role.pct100 + '%)</div>';
+                    // ✅ 2026-11-18 v3.35 安全：role.role / role.pct50 / role.pct100 来自报价 JSON
+                    html += '<div style="font-weight:600;color:#00B3B8;margin-bottom:5px;">' + escapeHtml(role.role) + '</div>';
+                    html += '<div style="font-size:12px;color:#666;">50% = RM ' + formatNumber(role.comm50) + ' (' + escapeHtml(role.pct50) + '%)</div>';
+                    html += '<div style="font-size:12px;color:#666;">100% = RM ' + formatNumber(role.comm100) + ' (' + escapeHtml(role.pct100) + '%)</div>';
                     if (role.deduct100 > 0) {
                         html += '<div style="font-size:12px;color:#c00;">扣除 = RM ' + formatNumber(role.deduct100) + '</div>';
                         html += '<div style="font-size:12px;color:#28a745;font-weight:600;">实收100% = RM ' + formatNumber(netComm100) + '</div>';
@@ -2887,7 +3077,8 @@
                 
                 html += '</div>';
                 html += '<div style="margin-top:12px;padding:10px;background:#e8f5e9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">';
-                html += '<div><strong>' + (lang?'内部备注':'Internal Notes') + ':</strong> ' + (d.internalNotes || '-') + '</div>';
+                // ✅ 2026-11-18 v3.35 安全：内部备注来自报价 JSON（业务员可填），必须转义
+                html += '<div><strong>' + (lang?'内部备注':'Internal Notes') + ':</strong> ' + escapeHtml(d.internalNotes || '-') + '</div>';
                 html += '<div><strong>' + (lang?'扣除分担':'Deduct Shared') + ':</strong> ' + (d.deductSharedRoles?.length > 0 ? d.deductSharedRoles.length + '个角色,每人RM ' + formatNumber(d.deductPerRole) : '-') + '</div>';
                 html += '<div style="font-size:16px;"><strong>' + (lang?'总实收100%':'Total Net 100%') + ':</strong> <span style="color:#28a745;font-weight:700;">RM ' + formatNumber(d.netCommTotal !== undefined ? d.netCommTotal : 0) + '</span></div>';
                 html += '</div>';
@@ -2977,8 +3168,18 @@
             document.getElementById('commHistoryModal').classList.remove('active');
         }
 
+        // ✅ 2026-11-18 v3.35 性能：筛选防抖
+        //   原来每敲一个字符就重建整张佣金结算表的 HTML（每行 2 个 <tr>，行数多时上千个节点），
+        //   在报价多的账号上是明显的输入卡顿。改成 120ms 防抖，筛选结果完全一样。
+        let _filterCommTimer = null;
+
         // 筛选佣金结算数据
         function filterCommSettlement() {
+            if (_filterCommTimer) clearTimeout(_filterCommTimer);
+            _filterCommTimer = setTimeout(_filterCommSettlementNow, 120);
+        }
+
+        function _filterCommSettlementNow() {
             const search = document.getElementById('commSearchProjNo').value.toLowerCase();
             const dateFrom = document.getElementById('commDateFrom').value;
             const dateTo = document.getElementById('commDateTo').value;
@@ -3036,6 +3237,9 @@
                 '<span>' + (lang?'扣除':'Deduct') + ' = RM ' + formatNumber(totalDeduct) + '</span> | ' +
                 '<span style="font-size:16px;font-weight:700;">' + (lang?'实收':'Net') + ' = RM ' + formatNumber(totalNet) + '</span>';
         }
+
+        // ✅ 2026-11-18 v3.35：佣金结算互斥锁（防并发写同一个 GAS 文件导致记录丢失）
+        let _markCommSettledBusy = false;
 
         // 标记佣金已结算
         async function markCommSettled(type) {
@@ -3095,6 +3299,22 @@
             let errorCount = 0;
             let skippedCount = 0;
 
+            // ✅ 2026-11-18 v3.35 防重入（防财务数据丢失，重要）：
+            //   GAS 的 markSettled 是「读 commission_settlement.json → 改 → 写回同一个文件」，
+            //   而且 GAS 端没有用 LockService（我查过 v3.34 的 .gs，全文没有 LockService）。
+            //   所以两个并发的 markSettled 会互相覆盖 —— 后写的把先写的记录冲掉，
+            //   结果就是「已发工资」的记录丢失。
+            //   前端原来没有任何互斥：用户在处理中再点一次「标记50%/100%」，
+            //   就会起第二个循环，两个循环并发写同一个文件。
+            //   这里加前端互斥锁挡住重复点击（串行执行，不改变任何正常流程）。
+            if (_markCommSettledBusy) {
+                alert(lang ? '结算正在处理中，请勿重复点击（等进度完成后再操作）'
+                           : 'Settlement is still in progress. Please wait before clicking again.');
+                return;
+            }
+            _markCommSettledBusy = true;
+
+            try {
             for (const cb of checkedBoxes) {
                 const idx = parseInt(cb.dataset.idx);
                 const d = commSettlementFilteredData[idx];
@@ -3122,11 +3342,7 @@
                     postData.append('type', type);
                     postData.append('settledBy', 'admin');
 
-                    const response = await fetch(GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: postData
-                    });
+                    const response = await _postWrite_(GAS_URL, postData);
                     const result = await response.json();
 
                     if (result.success) {
@@ -3146,6 +3362,9 @@
                         }
                         cb.disabled = true;
                         successCount++;
+                    } else if (_isAuthError_(result)) {
+                        _handleAuthError_(result);
+                        errorCount++;
                     } else {
                         console.error('Mark failed:', result);
                         alert((lang?'标记失败：':'Mark failed: ') + (result.message || ''));
@@ -3180,6 +3399,10 @@
             if (errorCount > 0) {
                 showToast((lang?'标记失败':'Marking failed') + ': ' + errorCount, 'error');
             }
+            } finally {
+                // ✅ v3.35：无论成功失败都释放互斥锁（否则一次异常后按钮就永久卡住）
+                _markCommSettledBusy = false;
+            }
         }
 
         // 导出佣金结算 Excel (本地下载 + 云端保存) - 2026-06-17: 按示例格式
@@ -3208,17 +3431,16 @@
                 postData.append('username', commSettlementKey);
                 postData.append('projNo', d.projNo);
                 postData.append('type', type);
-                const response = await fetch(GAS_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: postData
-                });
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await _postWrite_(GAS_URL, postData);
                 const result = await response.json();
                 if (result.success) {
                     showToast((lang?'已撤回 '+settleLabel+' 标记：':'Withdrew '+settleLabel+' mark: ') + d.projNo, 'success');
                     // 失效缓存 + 重新拉数据
                     invalidateCommCache(commSettlementKey);
                     await reloadCommSettlementData();
+                } else if (_isAuthError_(result)) {
+                    _handleAuthError_(result);
                 } else {
                     showToast((lang?'撤回失败：':'Withdraw failed: ') + (result.message || ''), 'error');
                 }
@@ -3355,13 +3577,10 @@
                 postData.append('filename', filename);
                 postData.append('csvData', csv);
                 
-                const response = await fetch(GAS_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: postData
-                });
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await _postWrite_(GAS_URL, postData);
                 const result = await response.json();
-                
+
                 if (result.success) {
                     // ✅ v3.27: 根据上传云端 vs 本地显示不同 toast
                     if (uploadToCloud) {
@@ -3369,6 +3588,8 @@
                     } else {
                         showToast((lang?'已保存本地（未上传云端）：':'Saved local only (not uploaded to cloud): ') + filename, 'success');
                     }
+                } else if (_isAuthError_(result)) {
+                    _handleAuthError_(result);
                 } else {
                     showToast((lang?'本地已下载，云端失败：':'Local saved, cloud failed: ') + (result.message || 'Unknown'), 'error');
                 }
@@ -3420,13 +3641,16 @@
                     url += '&originalUsername=' + encodeURIComponent(originalAccount);
                 }
 
-                const response = await fetch(url);
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(url));
                 const data = await response.json();
 
                 if (data.success) {
                     showToast(translations[currentLang].saveSuccess, 'success');
                     closeEditUserModal();
                     loadUsers();
+                } else if (_isAuthError_(data)) {
+                    _handleAuthError_(data);
                 } else {
                     showToast(data.message || 'Failed to update user', 'error');
                 }
@@ -3440,7 +3664,8 @@
             if (!confirm(translations[currentLang].deleteConfirm)) return;
 
             try {
-                const response = await fetch(GAS_URL + '?action=adminDeleteUser&username=' + encodeURIComponent(currentEditingUser.username));
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(GAS_URL + '?action=adminDeleteUser&username=' + encodeURIComponent(currentEditingUser.username)));
                 const data = await response.json();
 
                 if (data.success) {
@@ -3452,6 +3677,8 @@
                     }
                     _lsClearUserStats(currentEditingUser.username);
                     loadUsers();
+                } else if (_isAuthError_(data)) {
+                    _handleAuthError_(data);
                 } else {
                     showToast(data.message || 'Failed to delete user', 'error');
                 }
@@ -3466,6 +3693,11 @@
             if (!user) return;
 
             currentEditingUser = user;
+
+            // ✅ 2026-11-18 v3.35：换一个新的渲染令牌。
+            //   getUserStatistics 要 12.59s，如果用户点 A（慢）→ 立刻点 B（快），
+            //   A 的慢响应回来会把 B 的页面覆盖掉（串数据）。令牌对不上就丢弃渲染。
+            const _token = ++_detailRenderToken;
 
             // Set basic info
             document.getElementById('detailAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
@@ -3500,7 +3732,7 @@
                 renderDetailActivityLog([]);
 
                 // 发起网络请求
-                await fetchUserData(username);
+                await fetchUserData(username, _token);
             }
 
             // Show user details page
@@ -3560,6 +3792,8 @@
 
         function _lsClearUserStats(username) {
             try { localStorage.removeItem(LS_PREFIX + username); } catch (e) {}
+            // ✅ v3.35: 连后台刷新节流记录一起清（数据变了，要能立刻重新拉）
+            try { delete _userStatsFetchedAt[username]; } catch (e) {}
         }
 
         // ✅ 2026-10-10 v3.32 性能：Quote Details 弹窗 localStorage（秒开）
@@ -3567,31 +3801,52 @@
         //   saveAllCommission / markQuoteCompleted / withdrawCommissionLock
         const LS_QD_PREFIX = 'squirrel_quoteDetail_';
 
+        // ✅ 2026-11-18 v3.35 性能：quoteDetail 缓存的内存索引 { projNo: savedAt }
+        //   原来配额爆掉时，每次存缓存都要 Object.keys(localStorage) 全量扫 + 逐条 JSON.parse，
+        //   在报价多的账号上是主线程卡顿源（而且每存一条就重复一次）。
+        //   现在用内存索引淘汰最旧的，不再全量扫 localStorage（内存索引不够时的罕见路径才回退旧逻辑）。
+        const _lsQdIndex = {};
+
         function _lsSaveQuoteDetail(projNo, quote) {
+            const now = Date.now();
             try {
                 localStorage.setItem(LS_QD_PREFIX + projNo, JSON.stringify({
-                    savedAt: Date.now(),
+                    savedAt: now,
                     quote: quote
                 }));
+                _lsQdIndex[projNo] = now;
             } catch (e) {
                 // 单条 quote JSON 可能 20KB+，10 个用户 × 50 单可能撑爆 5MB 配额
                 // 超限时删掉最旧的再试一次，仍失败就静默降级（内存/网络缓存仍有效）
                 console.warn('[v3.32] quoteDetail localStorage save failed:', e && e.name);
                 try {
-                    const keys = Object.keys(localStorage).filter(function(k) {
-                        return k.indexOf(LS_QD_PREFIX) === 0;
-                    });
                     // 只留最近 30 条
-                    if (keys.length > 30) {
-                        const withTime = keys.map(function(k) {
-                            try { return { k: k, t: JSON.parse(localStorage.getItem(k)).savedAt || 0 }; }
-                            catch (e2) { return { k: k, t: 0 }; }
-                        }).sort(function(a, b) { return a.t - b.t; });
-                        withTime.slice(0, withTime.length - 30).forEach(function(o) {
-                            localStorage.removeItem(o.k);
+                    const idxKeys = Object.keys(_lsQdIndex);
+                    if (idxKeys.length > 30) {
+                        // 快路径：用内存索引排序淘汰，不扫 localStorage
+                        idxKeys.sort(function(a, b) { return _lsQdIndex[a] - _lsQdIndex[b]; })
+                            .slice(0, idxKeys.length - 30)
+                            .forEach(function(k) {
+                                try { localStorage.removeItem(LS_QD_PREFIX + k); } catch (e2) {}
+                                delete _lsQdIndex[k];
+                            });
+                    } else {
+                        // 罕见路径：内存索引还没攒够（页面刚打开），退回旧的全量扫描
+                        const keys = Object.keys(localStorage).filter(function(k) {
+                            return k.indexOf(LS_QD_PREFIX) === 0;
                         });
+                        if (keys.length > 30) {
+                            const withTime = keys.map(function(k) {
+                                try { return { k: k, t: JSON.parse(localStorage.getItem(k)).savedAt || 0 }; }
+                                catch (e2) { return { k: k, t: 0 }; }
+                            }).sort(function(a, b) { return a.t - b.t; });
+                            withTime.slice(0, withTime.length - 30).forEach(function(o) {
+                                localStorage.removeItem(o.k);
+                            });
+                        }
                     }
-                    localStorage.setItem(LS_QD_PREFIX + projNo, JSON.stringify({ savedAt: Date.now(), quote: quote }));
+                    localStorage.setItem(LS_QD_PREFIX + projNo, JSON.stringify({ savedAt: now, quote: quote }));
+                    _lsQdIndex[projNo] = now;
                 } catch (e2) {}
             }
         }
@@ -3604,8 +3859,11 @@
                 if (!env || !env.quote) return null;
                 if (Date.now() - (env.savedAt || 0) > LS_MAX_AGE_MS) {
                     localStorage.removeItem(LS_QD_PREFIX + projNo);
+                    try { delete _lsQdIndex[projNo]; } catch (e) {}
                     return null;
                 }
+                // ✅ v3.35: 顺手补进内存索引（跨会话读到的也能参与配额淘汰排序）
+                try { _lsQdIndex[projNo] = env.savedAt || 0; } catch (e) {}
                 return env.quote;
             } catch (e) {
                 return null;
@@ -3614,6 +3872,7 @@
 
         function _lsClearQuoteDetail(projNo) {
             try { localStorage.removeItem(LS_QD_PREFIX + projNo); } catch (e) {}
+            try { delete _lsQdIndex[projNo]; } catch (e) {}
         }
 
         // 预热 localStorage：登录后静默把上次的数据填进内存缓存（下次点用户立刻秒开）
@@ -3632,15 +3891,25 @@
             return false;
         }
 
+        // ✅ 2026-11-18 v3.35：用户详情渲染令牌 + 后台刷新节流记录
+        //   1) getUserStatistics 要 12.59s。用户点 A（慢）→ 立刻点 B（快），
+        //      A 的慢响应回来后会把 B 的页面覆盖掉（串数据）。
+        //      每次打开用户详情换一个令牌，响应回来时令牌对不上就丢弃渲染。
+        //   2) _userStatsFetchedAt 记录每个用户数据最后一次成功刷新的时间，
+        //      30 秒内不重复发同一个后台刷新（纯 SWR，用户无感知）。
+        let _detailRenderToken = 0;
+        const _userStatsFetchedAt = {};
+
         // 后台异步刷新用户数据（不影响UI）
         async function fetchUserDataInBackground(username) {
+            // ✅ v3.35: 30 秒内不重复刷新（原来连点同一个用户会连发 2 个 12.59s 的请求）
+            if (Date.now() - (_userStatsFetchedAt[username] || 0) < BG_REFRESH_MIN_INTERVAL_MS) return;
             try {
-                const [statsResponse, activityResponse] = await Promise.all([
-                    fetch(GAS_URL + '?action=getUserStatistics&username=' + encodeURIComponent(username)),
-                    fetch(GAS_URL + '?action=getUserActivities&username=' + encodeURIComponent(username))
+                // ✅ v3.35: 用 _getJson 合并并发请求（同一个 URL 同时只发 1 个）
+                const [statsData, activityData] = await Promise.all([
+                    _getJson(GAS_URL + '?action=getUserStatistics&username=' + encodeURIComponent(username)),
+                    _getJson(GAS_URL + '?action=getUserActivities&username=' + encodeURIComponent(username))
                 ]);
-                const statsData = await statsResponse.json();
-                const activityData = await activityResponse.json();
 
                 // 更新缓存
                 // ✅ 2026-08-07 改：statistics 用前端重新算的（只含 depositRecords > 0 的 quote）
@@ -3655,6 +3924,7 @@
                         statistics: dataCache.userStats[username].statistics,
                         quotes: dataCache.userStats[username].quotes
                     });
+                    _userStatsFetchedAt[username] = Date.now();
                 }
             } catch (e) {
                 console.error('Background refresh failed:', e);
@@ -3662,7 +3932,7 @@
         }
 
         // 获取用户数据（首次或缓存失效）
-        async function fetchUserData(username) {
+        async function fetchUserData(username, token) {
             // ✅ 2026-10-08 v3.31 性能：先秒开（localStorage），再异步用 GAS 数据覆盖
             // 原来：必须等 GAS 返回（10-25s）才渲染，GAS 挂了就一直空着
             // 现在：立刻显示上次的数据，GAS 结果到了自动刷新
@@ -3681,32 +3951,37 @@
 
             try {
                 // 并行请求统计和活动数据
-                const [statsResponse, activityResponse] = await Promise.all([
-                    fetch(GAS_URL + '?action=getUserStatistics&username=' + encodeURIComponent(username)),
-                    fetch(GAS_URL + '?action=getUserActivities&username=' + encodeURIComponent(username))
+                // ✅ v3.35: 用 _getJson 合并并发请求
+                const [statsData, activityData] = await Promise.all([
+                    _getJson(GAS_URL + '?action=getUserStatistics&username=' + encodeURIComponent(username)),
+                    _getJson(GAS_URL + '?action=getUserActivities&username=' + encodeURIComponent(username))
                 ]);
-                const statsData = await statsResponse.json();
-                const activityData = await activityResponse.json();
 
-                if (statsData.success) {
-                    // ✅ 2026-08-07 改：totals 只算有 depositRecords 的 quote
-                    const _filteredStats = filterAndRecalcStats(statsData.quotes, statsData.statistics);
-                    document.getElementById('detailQuoteCount').textContent = _filteredStats.totalQuotes || 0;
-                    document.getElementById('detailTotalSales').textContent = 'RM ' + formatNumber(_filteredStats.totalSales || 0);
-                    document.getElementById('detailTotalDebt').textContent = 'RM ' + formatNumber(_filteredStats.totalDebt || 0);
-                    renderDetailQuoteList(statsData.quotes || []);
-                } else if (!_lsData) {
-                    // ✅ v3.31: 只有"连 localStorage 都没有"才显示空白（原来总是清零）
-                    document.getElementById('detailQuoteCount').textContent = '0';
-                    document.getElementById('detailTotalSales').textContent = 'RM 0';
-                    document.getElementById('detailTotalDebt').textContent = 'RM 0';
-                    renderDetailQuoteList([]);
-                }
+                // ✅ v3.35 过期响应保护：用户已经切到别人了，别把旧数据渲染过去。
+                //   缓存写入照常做 —— 那只是缓存预热，没有副作用。
+                const _stale = (token !== undefined && token !== _detailRenderToken);
 
-                if (activityData.success) {
-                    renderDetailActivityLog(activityData.activities || []);
-                } else if (!_lsData) {
-                    renderDetailActivityLog([]);
+                if (!_stale) {
+                    if (statsData.success) {
+                        // ✅ 2026-08-07 改：totals 只算有 depositRecords 的 quote
+                        const _filteredStats = filterAndRecalcStats(statsData.quotes, statsData.statistics);
+                        document.getElementById('detailQuoteCount').textContent = _filteredStats.totalQuotes || 0;
+                        document.getElementById('detailTotalSales').textContent = 'RM ' + formatNumber(_filteredStats.totalSales || 0);
+                        document.getElementById('detailTotalDebt').textContent = 'RM ' + formatNumber(_filteredStats.totalDebt || 0);
+                        renderDetailQuoteList(statsData.quotes || []);
+                    } else if (!_lsData) {
+                        // ✅ v3.31: 只有"连 localStorage 都没有"才显示空白（原来总是清零）
+                        document.getElementById('detailQuoteCount').textContent = '0';
+                        document.getElementById('detailTotalSales').textContent = 'RM 0';
+                        document.getElementById('detailTotalDebt').textContent = 'RM 0';
+                        renderDetailQuoteList([]);
+                    }
+
+                    if (activityData.success) {
+                        renderDetailActivityLog(activityData.activities || []);
+                    } else if (!_lsData) {
+                        renderDetailActivityLog([]);
+                    }
                 }
 
                 // 保存到缓存
@@ -3722,10 +3997,13 @@
                         statistics: dataCache.userStats[username].statistics,
                         quotes: dataCache.userStats[username].quotes
                     });
+                    _userStatsFetchedAt[username] = Date.now();
                 }
             } catch (e) {
                 console.error('Error fetching user data:', e);
                 // ✅ v3.31: GAS 挂掉但有 localStorage → 保留已渲染的数据，只提示
+                const _stale = (token !== undefined && token !== _detailRenderToken);
+                if (_stale) return;
                 if (!_lsData) {
                     document.getElementById('detailTotalSales').textContent =
                         (currentLang === 'zh' ? '加载失败，请检查网络' : 'Load failed, check network');
@@ -3845,17 +4123,21 @@ function renderDetailQuoteList(quotes) {
                 const displayDate = q.sortTimestamp || q.createdAt || q.date || '';
                 const dateText = displayDate ? (displayDate.substring(0, 10)) : '-';
 
-                return '<tr onclick="openQuoteDetail(\'' + escapeHtml(q.projNo) + '\')" style="cursor:pointer;">' +
-                    '<td>' + dateText + '</td>' +
-                    '<td><a href="javascript:void(0)" onclick="event.stopPropagation();openQuoteDetail(\'' + escapeHtml(q.projNo) + '\')" style="color:#00B3B8;">' + escapeHtml(q.projNo) + '</a></td>' +
+                // ✅ 2026-11-18 v3.35 安全：projNo 来自报价 JSON（业务员可填），
+                //   绝不能拼进内联 onclick（' 闭合 → XSS）。改走 data-* + this.dataset。
+                const _p = encodeURIComponent(q.projNo || '');
+
+                return '<tr data-projno="' + _p + '" onclick="openQuoteDetail(decodeURIComponent(this.dataset.projno))" style="cursor:pointer;">' +
+                    '<td>' + escapeHtml(dateText) + '</td>' +
+                    '<td><a href="javascript:void(0)" data-projno="' + _p + '" onclick="event.stopPropagation();openQuoteDetail(decodeURIComponent(this.dataset.projno))" style="color:#00B3B8;">' + escapeHtml(q.projNo) + '</a></td>' +
                     '<td>' + escapeHtml(q.customerName || '-') + '</td>' +
                     '<td>RM ' + formatNumber(amount) + '</td>' +
                     '<td>RM ' + formatNumber(debt) + '</td>' +
                     '<td>' + debtPct + '</td>' +
                     '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span>' + commBadge + '</td>' +
                     '<td onclick="event.stopPropagation()" style="white-space:nowrap;">' +
-                        '<button class="btn btn-xs btn-secondary" onclick="adminShareQuote(\'' + escapeHtml(q.projNo) + '\')" style="margin-right:4px;">分享</button>' +
-                        '<button class="btn btn-xs" onclick="openWithdrawModal(\'' + escapeHtml(q.projNo) + '\')" style="background:#dc3545;color:#fff;">撤回</button>' +
+                        '<button class="btn btn-xs btn-secondary" data-projno="' + _p + '" onclick="adminShareQuote(decodeURIComponent(this.dataset.projno))" style="margin-right:4px;">分享</button>' +
+                        '<button class="btn btn-xs" data-projno="' + _p + '" onclick="openWithdrawModal(decodeURIComponent(this.dataset.projno))" style="background:#dc3545;color:#fff;">撤回</button>' +
                     '</td>' +
                 '</tr>';
             }).join('');
@@ -3881,7 +4163,9 @@ function renderDetailQuoteList(quotes) {
             withdrawCurrentProjNo = projNo;
             // 从缓存里找这个 quote 的 createdBy
             const q = (detailQuoteListCache || []).find(function(x) { return x.projNo === projNo; });
-            withdrawCurrentUsername = (q && q.createdBy) || currentEditingUser.username || '';
+            // ✅ v3.35 审查员 F8: 优先用 folderName(报价真实所在目录)
+            //   createdBy 是"谁建的", folderName 是"存在哪" → 写回必须用后者
+            withdrawCurrentUsername = (q && (q.folderName || q.createdByInFolder || q.createdBy)) || currentEditingUser.username || '';
 
             document.getElementById('withdrawProjNo').textContent = projNo;
 
@@ -3996,7 +4280,8 @@ function renderDetailQuoteList(quotes) {
             btn.disabled = true;
             btn.textContent = '处理中...';
             try {
-                const response = await fetch(GAS_URL + '?action=withdrawCommission&username=' + encodeURIComponent(username) + '&projNo=' + encodeURIComponent(projNo) + '&type=' + encodeURIComponent(type));
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(GAS_URL + '?action=withdrawCommission&username=' + encodeURIComponent(username) + '&projNo=' + encodeURIComponent(projNo) + '&type=' + encodeURIComponent(type)));
                 const result = await response.json();
                 if (result.success) {
                     showToast((currentLang === 'zh' ? '已撤回：' : 'Withdrew: ') + result.message, 'success');
@@ -4005,10 +4290,13 @@ function renderDetailQuoteList(quotes) {
                     if (currentEditingUser && currentEditingUser.username) {
                         delete dataCache.userStats[currentEditingUser.username];
                         _lsClearUserStats(currentEditingUser.username);
-                        await fetchUserData(currentEditingUser.username);
+                        // ✅ v3.35: 传当前渲染令牌（撤回后要刷新当前用户的详情）
+                        await fetchUserData(currentEditingUser.username, _detailRenderToken);
                     }
                     // v3.32: 清弹窗缓存（撤回会改 commission50/100SavedAt）
                     _lsClearQuoteDetail(projNo);
+                } else if (_isAuthError_(result)) {
+                    _handleAuthError_(result);
                 } else {
                     showToast(result.message || 'Failed', 'error');
                 }
@@ -4031,6 +4319,12 @@ function renderDetailQuoteList(quotes) {
                 return;
             }
 
+            // ✅ 2026-11-18 v3.35：报价详情渲染令牌
+            //   getQuoteDetail 要 17.34s。点 A（慢）→ 关掉 → 点 B（快），
+            //   A 的慢响应回来会把 B 的弹窗内容覆盖成 A（串数据）。
+            //   令牌对不上就丢弃渲染。
+            const _token = ++_quoteDetailToken;
+
             // ✅ 2026-10-10 v3.32 性能：localStorage 先渲染（秒开），GAS 后台刷新
             //   原来每次都等 GAS 3-13s 才显示内容
             //   安全：写操作（保存佣金/mark完成/撤回）都会 _lsClearQuoteDetail，不会看到旧财务数据
@@ -4047,8 +4341,12 @@ function renderDetailQuoteList(quotes) {
             modal.classList.add('active');
 
             try {
-                const response = await fetch(GAS_URL + '?action=getQuoteDetail&projNo=' + encodeURIComponent(projNo));
-                const data = await response.json();
+                // ✅ v3.35: 用 _getJson 合并并发请求（同一个 projNo 同时只发 1 个）
+                const data = await _getJson(GAS_URL + '?action=getQuoteDetail&projNo=' + encodeURIComponent(projNo));
+
+                // ✅ v3.35 过期响应保护：弹窗已经换成别的报价了，丢弃这次响应
+                if (_token !== _quoteDetailToken) return;
+
                 if (data.success && data.quote) {
                     renderQuoteDetailModal(data.quote);
                     _setCompleteBtnState(data.quote);
@@ -4059,6 +4357,7 @@ function renderDetailQuoteList(quotes) {
                 }
             } catch (e) {
                 console.error('Error loading quote detail:', e);
+                if (_token !== _quoteDetailToken) return;
                 // ✅ 有缓存就保留已渲染内容，只提示（GAS 挂掉时不至于白屏）
                 if (!_renderedFromCache) {
                     content.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">' + (currentLang === 'zh' ? '加载失败' : 'Failed to load') + '</p>';
@@ -4093,7 +4392,8 @@ function renderDetailQuoteList(quotes) {
                 showToast(currentLang === 'zh' ? '未找到项目编号' : 'Project number not found', 'error');
                 return;
             }
-            const username = (detail && detail.createdBy) || (currentEditingUser && currentEditingUser.username) || '';
+            // ✅ v3.35 审查员 F8: 优先用 folderName(报价真实所在目录)
+            const username = (detail && (detail.folderName || detail.createdByInFolder || detail.createdBy)) || (currentEditingUser && currentEditingUser.username) || '';
             if (!username) {
                 showToast(currentLang === 'zh' ? '未找到报价的 createdBy 字段' : 'Quote owner not found', 'error');
                 return;
@@ -4109,10 +4409,17 @@ function renderDetailQuoteList(quotes) {
                 btn.textContent = currentLang === 'zh' ? '处理中...' : 'Processing...';
             }
             try {
-                const response = await fetch(GAS_URL + '?action=markQuoteCompleted&username=' + encodeURIComponent(username) + '&projNo=' + encodeURIComponent(projNo));
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(GAS_URL + '?action=markQuoteCompleted&username=' + encodeURIComponent(username) + '&projNo=' + encodeURIComponent(projNo)));
                 const result = await response.json();
                 if (result.success) {
                     showToast(currentLang === 'zh' ? '已标记为「已完成」' : 'Marked as completed', 'success');
+                    // ✅ 2026-11-18 v3.35：作废在飞的 getQuoteDetail 响应。
+                    //   场景：弹窗是用本地缓存秒开的，getQuoteDetail 还在飞（~17s），
+                    //   用户此时点了「完成」。在飞的响应回来后是「完成之前」的旧数据，
+                    //   会把按钮重新渲染回「完成」（已完成状态被旧响应覆盖）。
+                    //   作废后弹窗保持本地已更新的「已完成」状态。
+                    _quoteDetailToken++;
                     // ✅ 2026-09-15 v3.29: 不再重 openQuoteDetail (又一次 getQuoteDetail fetch)
                     //   直接前端更新 currentQuoteDetail.status + renderQuoteDetailModal
                     //   节省 1 次 GAS 调用 (~5-25s 冷启动延迟)
@@ -4137,6 +4444,12 @@ function renderDetailQuoteList(quotes) {
                     }
                     // v3.32: 清弹窗缓存（status 变了）
                     _lsClearQuoteDetail(projNo);
+                } else if (_isAuthError_(result)) {
+                    _handleAuthError_(result);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = currentLang === 'zh' ? '完成' : 'Mark Completed';
+                    }
                 } else {
                     showToast(result.message || 'Failed', 'error');
                     if (btn) {
@@ -4227,7 +4540,7 @@ function renderDetailQuoteList(quotes) {
                 depositHtml += '<tr style="background:#e8e8e8;"><th style="padding:8px;border:1px solid #ccc;text-align:left;">' + (lang?'日期':'Date') + '</th><th style="padding:8px;border:1px solid #ccc;text-align:left;">RECEIPT NO</th><th style="padding:8px;border:1px solid #ccc;text-align:right;">' + (lang?'金额':'Amount') + '</th></tr>';
                 quote.depositRecords.forEach(dep => {
                     // 兼容历史 receipt 字段（报价系统旧版）+ 新 receiptNo 字段 (2026-06-15)
-                    depositHtml += '<tr><td style="padding:8px;border:1px solid #ccc;">' + formatDateTime(dep.date||null) + '</td><td style="padding:8px;border:1px solid #ccc;">' + (dep.receiptNo||dep.receipt||dep.note||'-') + '</td><td style="padding:8px;border:1px solid #ccc;text-align:right;">RM ' + formatNumber(dep.amount||0) + '</td></tr>';
+                    depositHtml += '<tr><td style="padding:8px;border:1px solid #ccc;">' + formatDateTime(dep.date||null) + '</td><td style="padding:8px;border:1px solid #ccc;">' + escapeHtml(dep.receiptNo||dep.receipt||dep.note||'-') + '</td><td style="padding:8px;border:1px solid #ccc;text-align:right;">RM ' + formatNumber(dep.amount||0) + '</td></tr>';
                 });
                 depositHtml += '</table>';
             } else {
@@ -4247,21 +4560,21 @@ function renderDetailQuoteList(quotes) {
                 // Row 2: Customer Info (4 columns)
                 '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#f5f5f5;border-radius:5px;">' +
                     '<div><label style="color:#666;font-size:12px;">' + (lang?'日期':'Date') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + formatDateTime(quote.date||quote.createdAt||null) + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'客户名称':'Customer Name') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.customerName||'-') + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'客户IC号':'Customer IC No') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.customerIC||'-') + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'客户电话':'Customer Contact') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.customerContact||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'客户名称':'Customer Name') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.customerName||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'客户IC号':'Customer IC No') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.customerIC||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'客户电话':'Customer Contact') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.customerContact||'-') + '</p></div>' +
                 '</div>' +
                 // Row 3: Project Info part 1 (3 columns)
                 '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#fff;border:1px solid #ddd;border-radius:5px;">' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'项目编号':'Project No') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.projNo||'-') + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'销售员':'Salesperson') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.salesperson||'-') + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'销售员电话':'Salesperson Contact') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.salespersonContact||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'项目编号':'Project No') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.projNo||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'销售员':'Salesperson') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.salesperson||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'销售员电话':'Salesperson Contact') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.salespersonContact||'-') + '</p></div>' +
                 '</div>' +
                 // Row 4: Project Info part 2 (3 columns)
                 '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:15px;padding:15px;background:#fff;border:1px solid #ddd;border-radius:5px;">' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'副销售员':'Sub Salesperson') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.subSalesperson||'-') + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'测量工程师':'Measurement Engineer') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.measurementEngineer||'-') + '</p></div>' +
-                    '<div><label style="color:#666;font-size:12px;">' + (lang?'设计师':'Designer') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + (quote.designerName||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'副销售员':'Sub Salesperson') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.subSalesperson||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'测量工程师':'Measurement Engineer') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.measurementEngineer||'-') + '</p></div>' +
+                    '<div><label style="color:#666;font-size:12px;">' + (lang?'设计师':'Designer') + '</label><p style="font-size:14px;font-weight:600;margin:5px 0;">' + escapeHtml(quote.designerName||'-') + '</p></div>' +
                 '</div>' +
                 // Row 5: Debt details (deposit records) - 日期 | RECEIPT NO | 金额
                 '<div style="padding:15px;background:#fafafa;border:1px solid #ddd;border-radius:5px;">' +
@@ -4289,50 +4602,50 @@ function renderDetailQuoteList(quotes) {
                     // Salesperson row
                     '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;font-size:12px;min-width:800px;">' +
                         '<div style="width:80px;color:#333;">' + (lang?'销售员':'Salesperson') + '</div>' +
-                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.salesperson||'-') + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_salesperson_pct50" value="' + (quote.salespersonCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'salesperson\')"></div>' +
+                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(quote.salesperson||'-') + '</div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_salesperson_pct50" value="' + escapeHtml(quote.salespersonCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'salesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_salesperson_amt50">RM ' + ((Math.round(paidAmount50 * (quote.salespersonCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_salesperson_pct100" value="' + (quote.salespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'salesperson\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_salesperson_pct100" value="' + escapeHtml(quote.salespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'salesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_salesperson_amt100">RM ' + ((Math.round(paidAmount100 * (quote.salespersonCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_salesperson_total">RM ' + ((Math.round((paidAmount50 * (quote.salespersonCommissionPct50||0) + paidAmount100 * (quote.salespersonCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
                     // Sub Salesperson row
                     '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;font-size:12px;min-width:800px;">' +
                         '<div style="width:80px;color:#333;">' + (lang?'副销售':'Sub Salesperson') + '</div>' +
-                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.subSalesperson||'-') + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct50" value="' + (quote.subSalespersonCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
+                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(quote.subSalesperson||'-') + '</div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct50" value="' + escapeHtml(quote.subSalespersonCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_subSalesperson_amt50">RM ' + ((Math.round(paidAmount50 * (quote.subSalespersonCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct100" value="' + (quote.subSalespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_subSalesperson_pct100" value="' + escapeHtml(quote.subSalespersonCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'subSalesperson\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_subSalesperson_amt100">RM ' + ((Math.round(paidAmount100 * (quote.subSalespersonCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_subSalesperson_total">RM ' + ((Math.round((paidAmount50 * (quote.subSalespersonCommissionPct50||0) + paidAmount100 * (quote.subSalespersonCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
                     // Measurement Engineer row
                     '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;font-size:12px;min-width:800px;">' +
                         '<div style="width:80px;color:#333;">' + (lang?'测量':'Measurement') + '</div>' +
-                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.measurementEngineer||'-') + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct50" value="' + (quote.measurementEngineerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
+                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(quote.measurementEngineer||'-') + '</div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct50" value="' + escapeHtml(quote.measurementEngineerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_measurementEngineer_amt50">RM ' + ((Math.round(paidAmount50 * (quote.measurementEngineerCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct100" value="' + (quote.measurementEngineerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_measurementEngineer_pct100" value="' + escapeHtml(quote.measurementEngineerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'measurementEngineer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_measurementEngineer_amt100">RM ' + ((Math.round(paidAmount100 * (quote.measurementEngineerCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_measurementEngineer_total">RM ' + ((Math.round((paidAmount50 * (quote.measurementEngineerCommissionPct50||0) + paidAmount100 * (quote.measurementEngineerCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
                     // Designer row
                     '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;font-size:12px;min-width:800px;">' +
                         '<div style="width:80px;color:#333;">' + (lang?'设计':'Designer') + '</div>' +
-                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (quote.designerName||'-') + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_designer_pct50" value="' + (quote.designerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'designer\')"></div>' +
+                        '<div style="width:100px;color:#333;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(quote.designerName||'-') + '</div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_designer_pct50" value="' + escapeHtml(quote.designerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'designer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_designer_amt50">RM ' + ((Math.round(paidAmount50 * (quote.designerCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_designer_pct100" value="' + (quote.designerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'designer\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_designer_pct100" value="' + escapeHtml(quote.designerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'designer\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_designer_amt100">RM ' + ((Math.round(paidAmount100 * (quote.designerCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_designer_total">RM ' + ((Math.round((paidAmount50 * (quote.designerCommissionPct50||0) + paidAmount100 * (quote.designerCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
                     // 总负责人 row
                     '<div style="display:flex;gap:8px;margin-bottom:0;align-items:center;font-size:12px;min-width:800px;">' +
                         '<div style="width:80px;color:#333;font-weight:600;">' + (lang?'总负责':'General Mgr') + '</div>' +
-                        '<div style="width:100px;"><select id="comm_generalManager_name" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;font-size:12px;"><option value="">' + (lang?'请选择':'Select') + '</option>' + ((dataCache.users||users).filter(u => u.departments && u.departments.includes('admin')).map(u => '<option value="' + (u.displayName||u.username) + '"' + (quote.generalManagerName === (u.displayName||u.username) ? ' selected' : '') + '>' + (u.displayName||u.username) + '</option>').join('')) + '</select></div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_generalManager_pct50" value="' + (quote.generalManagerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'generalManager\')"></div>' +
+                        '<div style="width:100px;"><select id="comm_generalManager_name" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;font-size:12px;"><option value="">' + (lang?'请选择':'Select') + '</option>' + ((dataCache.users||users).filter(u => u.departments && u.departments.includes('admin')).map(u => '<option value="' + escapeHtml(u.displayName||u.username) + '"' + (quote.generalManagerName === (u.displayName||u.username) ? ' selected' : '') + '>' + escapeHtml(u.displayName||u.username) + '</option>').join('')) + '</select></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_generalManager_pct50" value="' + escapeHtml(quote.generalManagerCommissionPct50||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is50Locked || !canInput50 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is50Locked || !canInput50 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'generalManager\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_generalManager_amt50">RM ' + ((Math.round(paidAmount50 * (quote.generalManagerCommissionPct50||0) / 100)).toFixed(2)) + '</div>' +
-                        '<div style="width:60px;"><input type="number" id="comm_generalManager_pct100" value="' + (quote.generalManagerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'generalManager\')"></div>' +
+                        '<div style="width:60px;"><input type="number" id="comm_generalManager_pct100" value="' + escapeHtml(quote.generalManagerCommissionPct100||'') + '" placeholder="%" min="0" max="100" style="width:100%;padding:5px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px;' + (is100Locked || !canInput100 ? 'background:#e0e0e0;color:#999;' : '') + '" ' + (is100Locked || !canInput100 ? 'disabled' : '') + ' onchange="updateCommissionAmount(\'generalManager\')"></div>' +
                         '<div style="width:80px;text-align:right;color:#333;font-weight:600;font-size:12px;" id="comm_generalManager_amt100">RM ' + ((Math.round(paidAmount100 * (quote.generalManagerCommissionPct100||0) / 100)).toFixed(2)) + '</div>' +
                         '<div style="width:90px;text-align:right;font-weight:700;color:#00B3B8;font-size:14px;" id="comm_generalManager_total">RM ' + ((Math.round((paidAmount50 * (quote.generalManagerCommissionPct50||0) + paidAmount100 * (quote.generalManagerCommissionPct100||0)) / 100)).toFixed(2)) + '</div>' +
                     '</div>' +
@@ -4340,7 +4653,7 @@ function renderDetailQuoteList(quotes) {
                 // Internal Notes Section
                 '<div style="padding:15px;background:#fff;border:1px solid #ccc;margin-top:15px;">' +
                     '<h4 style="margin:0 0 10px 0;color:#333;font-size:14px;font-weight:600;">' + (lang?'内部备注':'Internal Notes') + '</h4>' +
-                    '<div style="padding:10px;background:#f9f9f9;border-radius:4px;font-size:13px;color:#555;line-height:1.6;">' + (quote.internalNotes||(lang?'暂无备注':'No notes')) + '</div>' +
+                    '<div style="padding:10px;background:#f9f9f9;border-radius:4px;font-size:13px;color:#555;line-height:1.6;">' + escapeHtml(quote.internalNotes||(lang?'暂无备注':'No notes')) + '</div>' +
                 '</div>' +
                 // Row 7: 扣除佣金 Section
                 '<div style="padding:15px;background:#fff;border:1px solid #ccc;margin-top:15px;">' +
@@ -4349,7 +4662,7 @@ function renderDetailQuoteList(quotes) {
                     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;margin-bottom:10px;align-items:center;">' +
                         '<div style="display:flex;align-items:center;gap:8px;">' +
                             '<span style="color:#666;font-size:12px;">' + (lang?'最终报价利润%':'Final Quote Profit %') + '</span>' +
-                            '<input type="number" id="deduct_profit_pct" value="' + (quote.deductProfitPct||'') + '" placeholder="0" min="0" max="100" style="width:70px;padding:6px;border:1px solid #ddd;text-align:center;" oninput="updateDeductCommission()">' +
+                            '<input type="number" id="deduct_profit_pct" value="' + escapeHtml(quote.deductProfitPct||'') + '" placeholder="0" min="0" max="100" style="width:70px;padding:6px;border:1px solid #ddd;text-align:center;" oninput="updateDeductCommission()">' +
                             '<span style="color:#666;">%</span>' +
                         '</div>' +
                         '<div style="display:flex;align-items:center;gap:8px;">' +
@@ -4368,7 +4681,7 @@ function renderDetailQuoteList(quotes) {
                     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;margin-bottom:15px;align-items:center;">' +
                         '<div style="display:flex;align-items:center;gap:8px;">' +
                             '<span style="color:#666;font-size:12px;">' + (lang?'扣除尾数金额':'Hand Cost Amount') + '</span>' +
-                            '<input type="number" id="deduct_hand_input" value="' + (quote.deductHandInput||'') + '" placeholder="0" min="0" style="width:100px;padding:6px;border:1px solid #ddd;" oninput="updateDeductHandCost()">' +
+                            '<input type="number" id="deduct_hand_input" value="' + escapeHtml(quote.deductHandInput||'') + '" placeholder="0" min="0" style="width:100px;padding:6px;border:1px solid #ddd;" oninput="updateDeductHandCost()">' +
                         '</div>' +
                         '<div style="display:flex;align-items:center;gap:8px;">' +
                             '<span style="color:#666;font-size:12px;">' + (lang?'70%试算（公司承担）':'70% (Company)') + '</span>' +
@@ -4402,9 +4715,9 @@ function renderDetailQuoteList(quotes) {
                     '</div>' +
                     // 备注和保存按钮（右下角）
                     '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                        '<input type="text" id="deduct_remarks" value="' + (quote.deductRemarks||'') + '" placeholder="' + (lang?'备注':'Remarks') + '" style="flex:1;padding:8px;border:1px solid #ddd;margin-right:15px;">' +
+                        '<input type="text" id="deduct_remarks" value="' + escapeHtml(quote.deductRemarks||'') + '" placeholder="' + (lang?'备注':'Remarks') + '" style="flex:1;padding:8px;border:1px solid #ddd;margin-right:15px;">' +
                         '<button class="btn btn-primary" onclick="exportQuoteDetailExcel()" style="background:#28a745;color:#fff;padding:10px 20px;border:none;border-radius:4px;cursor:pointer;font-size:14px;margin-right:10px;">' + (lang?'导出Excel':'Export Excel') + '</button>' +
-                        '<button class="btn btn-primary" onclick="saveAllCommission(\'' + (quote.projNo||'') + '\')" style="background:#00B3B8;color:#fff;padding:10px 25px;border:none;border-radius:4px;cursor:pointer;font-size:14px;">' + (lang?'保存':'Save') + '</button>' +
+                        '<button class="btn btn-primary" onclick="saveAllCommission(decodeURIComponent(this.dataset.projno))" data-projno="' + encodeURIComponent(quote.projNo||'') + '" style="background:#00B3B8;color:#fff;padding:10px 25px;border:none;border-radius:4px;cursor:pointer;font-size:14px;">' + (lang?'保存':'Save') + '</button>' +
                     '</div>' +
                 '</div>' +
             '</div>';
@@ -4459,6 +4772,9 @@ function renderDetailQuoteList(quotes) {
         function closeQuoteDetailModal() {
             const modal = document.getElementById('quoteDetailModal');
             if (modal) modal.classList.remove('active');
+            // ✅ 2026-11-18 v3.35：关闭时作废在飞的 getQuoteDetail 响应，
+            //   避免弹窗关掉后又被慢响应填回旧内容（下次打开也是新的）
+            _quoteDetailToken++;
         }
 
         // ==================== 导出Quote Details为Excel ====================
@@ -4686,16 +5002,30 @@ function renderDetailQuoteList(quotes) {
                     quote.totalDeductAmount = totalDeduct;
                     
                     // 保存到GAS
-                    const saveResponse = await fetch(GAS_URL + '?action=saveQuote', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(quote)
-                    });
-                    
+                    // ✅ 2026-11-18 v3.35 修 🔴-4：原来用 application/json + JSON body，
+                    //   但后端 doPost 只读 e.parameter（从不解析 body）→ action 为 undefined
+                    //   → 返回「Unknown action: undefined」→ 100% 失败。
+                    //   改成和 saveAllCommission 一样的 form-urlencoded（action/username/projNo/quoteData）。
+                    //   ⚠️ 不能用 application/json：那是 non-simple content type，会触发 CORS 预检，
+                    //   而 GAS 的 doPost 不处理 OPTIONS → 405。
+                    const _postData = new URLSearchParams();
+                    _postData.append('action', 'saveQuote');
+                    // ✅ v3.35 审查员 F8: 优先用 folderName(报价真实所在目录), 避免写错目录留下副本
+                    _postData.append('username', quote.folderName || quote.createdByInFolder || quote.createdBy || sessionStorage.getItem('adminUsername') || '');
+                    _postData.append('projNo', projNo);
+                    _postData.append('quoteData', JSON.stringify(quote));
+                    // token 走表单字段（写操作要带鉴权 token）
+                    const saveResponse = await _postWrite_(GAS_URL, _postData);
+
                     const saveResult = await saveResponse.json();
                     if (saveResult.success) {
                         showToast(currentLang === 'zh' ? '已保存扣除佣金数据' : 'Deduct commission saved', 'success');
+                        // ✅ 2026-11-18 v3.35：扣除数据变了，必须清弹窗缓存，
+                        //   否则重开弹窗会先显示旧的扣除金额（直到 GAS 刷新覆盖）。
+                        _lsClearQuoteDetail(projNo);
                         closeQuoteDetailModal();
+                    } else if (_isAuthError_(saveResult)) {
+                        _handleAuthError_(saveResult);
                     } else {
                         showToast(saveResult.message || 'Failed to save', 'error');
                     }
@@ -4706,10 +5036,30 @@ function renderDetailQuoteList(quotes) {
             }
         }
         
+        // ✅ 2026-11-18 v3.35：佣金保存互斥锁（防重复提交）
+        //   GAS 的 saveQuote 是「读 quote 文件 → 改 → 写回同一个文件」。
+        //   双击「保存」会并发发 2 次 getQuoteDetail + 2 次 saveQuote，
+        //   既浪费 2 个 17s 的读，又可能让两次写互相覆盖字段。
+        let _commissionSaveBusy = false;
+
         // 统一保存所有佣金数据（佣金计算 + 扣除佣金）
         async function saveAllCommission(projNo) {
             if (!projNo) return;
+            // ✅ v3.35 防重复提交
+            if (_commissionSaveBusy) {
+                showToast(currentLang === 'zh' ? '正在保存中，请勿重复点击' : 'Saving in progress, please do not click again', 'warning');
+                return;
+            }
+            _commissionSaveBusy = true;
+            try {
+                await _saveAllCommissionInner(projNo);
+            } finally {
+                _commissionSaveBusy = false;
+            }
+        }
 
+        // 统一保存所有佣金数据（佣金计算 + 扣除佣金）—— 实际实现
+        async function _saveAllCommissionInner(projNo) {
             const grandTotal = window.currentQuoteGrandTotal || 0;
 
             // === 重新拉取 quote 用最新 depositRecords 算池（不在前端用缓存） ===
@@ -4808,7 +5158,8 @@ function renderDetailQuoteList(quotes) {
                 //   节省 1 次 GAS 调用 (~5-25s 冷启动延迟)
                 if (quoteForPool) {
                     const quote = quoteForPool;
-                    const ownerUsername = quote.createdBy || sessionStorage.getItem('adminUsername') || '';
+                    // ✅ v3.35 审查员 F8: 优先用 folderName(报价真实所在目录)
+                    const ownerUsername = quote.folderName || quote.createdByInFolder || quote.createdBy || sessionStorage.getItem('adminUsername') || '';
 
                     // 只发送佣金相关字段，大幅减少数据量
                     const commissionData = {
@@ -4855,11 +5206,8 @@ deductCommissionPct: deductCommissionPct,
                     console.log('[v3.1 save] paidAmount50=' + paidAmount50ToSave + ' | paidAmount100=' + paidAmount100ToSave);
                     console.log('[v3.1 save] full payload (with merge via saveQuote):', _fullQuote);
 
-                    const saveResponse = await fetch(GAS_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: _postBody
-                    });
+                    // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                    const saveResponse = await _postWrite_(GAS_URL, _postBody);
                     const saveResult = await saveResponse.json();
                     console.log('[v3.1 save] GAS response:', saveResult);
                     if (saveResult.success) {
@@ -4873,6 +5221,8 @@ deductCommissionPct: deductCommissionPct,
                         // v3.32: 弹窗缓存也要清（佣金变了，重开不能看到旧值）
                         _lsClearQuoteDetail(projNo);
                         setTimeout(() => closeQuoteDetailModal(), 1500);
+                    } else if (_isAuthError_(saveResult)) {
+                        _handleAuthError_(saveResult);
                     } else {
                         showToast(saveResult.message || 'Failed to save', 'error');
                     }
@@ -4958,12 +5308,17 @@ deductCommissionPct: deductCommissionPct,
                     data.quote.designerCommission = quoteData.designerCommission;
                     
                     // 保存到原用户文件夹
-                    const saveResponse = await fetch(GAS_URL + '?action=saveQuote&username=' + encodeURIComponent(data.quote.createdBy) + 
-                        '&projNo=' + encodeURIComponent(projNo) + '&quoteData=' + encodeURIComponent(JSON.stringify(data.quote)));
+                    // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                    // ✅ v3.35 审查员 F8: 优先用 folderName(报价真实所在目录)
+                    const _saveOwner = data.quote.folderName || data.quote.createdByInFolder || data.quote.createdBy || '';
+                    const saveResponse = await fetch(_wt_(GAS_URL + '?action=saveQuote&username=' + encodeURIComponent(_saveOwner) +
+                        '&projNo=' + encodeURIComponent(projNo) + '&quoteData=' + encodeURIComponent(JSON.stringify(data.quote))));
                     const saveData = await saveResponse.json();
-                    
+
                     if (saveData.success) {
                         showToast(currentLang === 'zh' ? '佣金已保存' : 'Commission saved', 'success');
+                    } else if (_isAuthError_(saveData)) {
+                        _handleAuthError_(saveData);
                     } else {
                         showToast(saveData.message || (currentLang === 'zh' ? '保存失败' : 'Save failed'), 'error');
                     }
@@ -5005,7 +5360,8 @@ deductCommissionPct: deductCommissionPct,
 
             container.innerHTML = activities.slice(0, 50).map(a => '<tr>' +
                 '<td>' + formatDateTime(a.timestamp) + '</td>' +
-                '<td>' + (actionLabels[a.action] || a.action) + '</td>' +
+                // ✅ 2026-11-18 v3.35 安全：未知 action 走原始字符串，要转义
+                '<td>' + escapeHtml(actionLabels[a.action] || a.action) + '</td>' +
                 '<td>' + escapeHtml(a.details || '-') + '</td>' +
             '</tr>').join('');
         }
@@ -5019,12 +5375,15 @@ deductCommissionPct: deductCommissionPct,
             if (!targetUsername) return;
 
             try {
-                const response = await fetch(GAS_URL + '?action=shareQuote&username=' + encodeURIComponent(currentEditingUser.username) + 
-                    '&targetUsername=' + encodeURIComponent(targetUsername) + '&projNo=' + encodeURIComponent(projNo));
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(GAS_URL + '?action=shareQuote&username=' + encodeURIComponent(currentEditingUser.username) +
+                    '&targetUsername=' + encodeURIComponent(targetUsername) + '&projNo=' + encodeURIComponent(projNo)));
                 const data = await response.json();
 
                 if (data.success) {
                     showToast(currentLang === 'zh' ? '分享成功!' : 'Share successful!', 'success');
+                } else if (_isAuthError_(data)) {
+                    _handleAuthError_(data);
                 } else {
                     showToast(data.message || (currentLang === 'zh' ? '分享失败' : 'Share failed'), 'error');
                 }
@@ -5051,8 +5410,8 @@ deductCommissionPct: deductCommissionPct,
 
             // Fetch all quotes for analysis
             try {
-                const response = await fetch(GAS_URL + '?action=getAllQuotes');
-                const data = await response.json();
+                // ✅ 2026-11-18 v3.35：读操作合并（连点两次「报价分析」只发 1 个请求）
+                const data = await _getJson(GAS_URL + '?action=getAllQuotes');
 
                 if (data.success) {
                     renderAnalysisStats(data.quotes || []);
@@ -5092,10 +5451,14 @@ deductCommissionPct: deductCommissionPct,
 
             container.innerHTML = quotes.map(q => {
                 const statusClass = q.status === 'completed' ? 'status-completed' : 'status-active';
-                const statusText = q.status === 'completed' ? 
-                    (currentLang === 'zh' ? '已完成' : 'Completed') : 
+                const statusText = q.status === 'completed' ?
+                    (currentLang === 'zh' ? '已完成' : 'Completed') :
                     (currentLang === 'zh' ? '进行中' : 'Active');
                 const debt = (q.grandTotal || 0) - (q.paidAmount || 0);
+                // ✅ 2026-11-18 v3.35 安全：参数走 data-*（createdBy/projNo 来自报价 JSON）
+                // ✅ v3.35 审查员 F8: 优先用 folderName(报价真实所在目录)
+                const _owner = encodeURIComponent(q.folderName || q.createdByInFolder || q.createdBy || '');
+                const _proj = encodeURIComponent(q.projNo || '');
                 return '<tr>' +
                     '<td>' + escapeHtml(q.createdBy || '-') + '</td>' +
                     '<td>' + escapeHtml(q.projNo || '-') + '</td>' +
@@ -5103,7 +5466,7 @@ deductCommissionPct: deductCommissionPct,
                     '<td>RM ' + formatNumber(q.grandTotal || 0) + '</td>' +
                     '<td>RM ' + formatNumber(debt) + '</td>' +
                     '<td><span class="status-badge ' + statusClass + '">' + statusText + '</span></td>' +
-                    '<td><button class="btn btn-sm btn-secondary" onclick="adminShareAnyQuote(\'' + escapeHtml(q.createdBy || '') + '\', \'' + escapeHtml(q.projNo || '') + '\')">分享</button></td>' +
+                    '<td><button class="btn btn-sm btn-secondary" data-owner="' + _owner + '" data-projno="' + _proj + '" onclick="adminShareAnyQuote(decodeURIComponent(this.dataset.owner), decodeURIComponent(this.dataset.projno))">分享</button></td>' +
                 '</tr>';
             }).join('');
         }
@@ -5118,12 +5481,15 @@ deductCommissionPct: deductCommissionPct,
             if (!targetUsername) return;
 
             try {
-                const response = await fetch(GAS_URL + '?action=shareQuote&username=' + encodeURIComponent(username) + 
-                    '&targetUsername=' + encodeURIComponent(targetUsername) + '&projNo=' + encodeURIComponent(projNo));
+                // ✅ 2026-11-18 v3.35 安全：写操作带鉴权 token
+                const response = await fetch(_wt_(GAS_URL + '?action=shareQuote&username=' + encodeURIComponent(username) +
+                    '&targetUsername=' + encodeURIComponent(targetUsername) + '&projNo=' + encodeURIComponent(projNo)));
                 const data = await response.json();
 
                 if (data.success) {
                     showToast(currentLang === 'zh' ? '分享成功!' : 'Share successful!', 'success');
+                } else if (_isAuthError_(data)) {
+                    _handleAuthError_(data);
                 } else {
                     showToast(data.message || (currentLang === 'zh' ? '分享失败' : 'Share failed'), 'error');
                 }
@@ -5245,11 +5611,20 @@ deductCommissionPct: deductCommissionPct,
             }
         }
 
+        // ✅ 2026-11-18 v3.35 安全：HTML 转义
+        //   旧版用 div.textContent → div.innerHTML，只转义 & < >，**不转义 ' 和 "**。
+        //   现在改成纯字符串替换，转义 & < > " ' 全部 5 个。
+        //   注意：光转义引号**不能**解决内联 onclick 的引号闭合问题
+        //   （HTML 解析属性值时会先解码实体），所以 onclick 一律改成 data-* + this.dataset。
+        //   本函数用于「文本节点」和「属性值」两种上下文。
         function escapeHtml(str) {
-            if (!str) return '';
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
     </script>
 
@@ -5316,7 +5691,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  padding-bottom: 16px; /* 8px ???? + 8px ??????????? */
+  padding-bottom: 16px; /* 8px 内容间距 + 8px 用于鼠标移动的透明区域 */
   font-size: 12px;
   line-height: 17px;
   background-color: #fafafa;
@@ -5326,7 +5701,7 @@ body {
   color: #171717;
 }
 
-/* ?????????,?????????? tooltip */
+/* 创建透明的连接区域，让鼠标可以平滑移动到 tooltip */
 .tooltip-content::after {
   content: '';
   position: absolute;
@@ -5369,7 +5744,7 @@ body {
   color: #000000;
 }
 
-/* ?????? */
+/* 深色模式支持 */
 @media (prefers-color-scheme: dark) {
   .trigger-content {
     background-color: transparent;
@@ -5409,13 +5784,13 @@ body {
     </div>
     <div class="tooltip-content">
       <section class="info-section">
-        <span>??????????</span>
+        <span>上海稀宇科技有限公司</span>
       </section>
 
       <section class="info-section">
         <a class="beian-link" href="https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=31010402010179" target="_blank" rel="noreferrer">
           <img alt="hailuo-beian-icon" src="./Squirrel Designer - 管理后台_files/223037d3-79fd-4db0-a456-749f38a6a14b.png" class="beian-icon">
-          <span class="underline-text">?????31010402010179?</span>
+          <span class="underline-text">沪公网安备31010402010179号</span>
         </a>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" class="underline-text">
           ?ICP?2023003282?-38
@@ -5423,16 +5798,16 @@ body {
       </section>
 
       <section class="info-section">
-        <span>????:MiniMax</span>
-        <span>???:Shanghai-MiniMax-202505230046</span>
+        <span>模型名称：MiniMax</span>
+        <span>备案号：Shanghai-MiniMax-202505230046</span>
       </section>
 
       <section class="info-section">
         <a href="https://agent.minimaxi.com/doc/zh/terms-of-service.html" target="_blank" rel="noreferrer" class="underline-text">
-          ????
+          用户协议
         </a>
         <a href="https://agent.minimaxi.com/doc/zh/privacy-policy.html" target="_blank" rel="noreferrer" class="underline-text">
-          ????
+          隐私政策
         </a>
       </section>
     </div>
